@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+*.log
+.DS_Store
+coverage/
+.turbo/
+apps/dashboard/dist/
+apps/worker/public/

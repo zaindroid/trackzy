@@ -1,0 +1,62 @@
+name = "fulfillment-tracker"
+main = "apps/worker/src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+# Static dashboard build output, served by the same Worker (Workers Assets).
+# TODO(HUMAN): run `pnpm build` first so apps/dashboard/dist exists before `wrangler deploy`.
+[assets]
+directory = "apps/dashboard/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+# D1 database. database_id is a placeholder until a real database is created.
+# TODO(HUMAN): `wrangler d1 create fulfillment-tracker-db` then paste the returned id below.
+[[d1_databases]]
+binding = "DB"
+database_name = "fulfillment-tracker-db"
+database_id = "PLACEHOLDER__D1_DATABASE_ID"
+migrations_dir = "packages/db/migrations"
+
+# Queue: webhook fan-out only. Real work happens in Workflows, not here.
+[[queues.producers]]
+queue = "order-events"
+binding = "ORDER_QUEUE"
+
+[[queues.consumers]]
+queue = "order-events"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 3
+dead_letter_queue = "order-events-dlq"
+
+[[queues.producers]]
+queue = "order-events-dlq"
+binding = "ORDER_QUEUE_DLQ"
+
+# Durable orchestration for the order lifecycle and dispute drafting.
+[[workflows]]
+binding = "ORDER_WORKFLOW"
+name = "order-workflow"
+class_name = "OrderWorkflow"
+
+[[workflows]]
+binding = "DISPUTE_WORKFLOW"
+name = "dispute-workflow"
+class_name = "DisputeWorkflow"
+
+# Non-secret runtime config. Secrets (tokens/keys) go through `.dev.vars` locally
+# and `wrangler secret put` in production — never committed here.
+[vars]
+MOCK_MODE = "true"
+ENVIRONMENT = "development"
+
+# Inbound supplier tracking emails arrive via Cloudflare Email Routing, which is
+# configured in the dashboard (see DEPLOY.md) and dispatches to this Worker's
+# `email()` export in apps/worker/src/email.ts — no wrangler.toml binding needed
+# for inbound; `send_email` below is for outbound (dispute email sending, mocked).
+[[send_email]]
+name = "DISPUTE_EMAIL"

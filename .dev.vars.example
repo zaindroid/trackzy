@@ -1,0 +1,29 @@
+# Copy this file to `.dev.vars` for local `wrangler dev` runs.
+# Every value below is a non-functional placeholder. Any adapter whose key
+# starts with PLACEHOLDER__ (or when MOCK_MODE=true) runs its mock implementation.
+
+# Master switch: forces every adapter to its fixture-backed mock, regardless
+# of whether the keys below look "real". Keep true for local dev / CI.
+MOCK_MODE=true
+
+# --- Shopify Admin API (per-storefront values normally live in D1 `storefronts`
+# table as *_ref pointers to secrets; these are process-wide fallbacks used by
+# the mock adapter and by DEPLOY.md instructions) ---
+SHOPIFY_ACCESS_TOKEN=PLACEHOLDER__SHOPIFY_ACCESS_TOKEN
+SHOPIFY_WEBHOOK_SECRET=PLACEHOLDER__SHOPIFY_WEBHOOK_SECRET
+SHOPIFY_API_VERSION=2024-10
+
+# --- Google Gemini Flash (email-extraction fallback + dispute drafting ONLY) ---
+GEMINI_API_KEY=PLACEHOLDER__GEMINI_API_KEY
+GEMINI_MODEL=gemini-1.5-flash
+
+# --- 17TRACK carrier tracking events ---
+SEVENTEENTRACK_API_KEY=PLACEHOLDER__SEVENTEENTRACK_API_KEY
+
+# --- Clerk auth ---
+CLERK_SECRET_KEY=PLACEHOLDER__CLERK_SECRET_KEY
+CLERK_PUBLISHABLE_KEY=PLACEHOLDER__CLERK_PUBLISHABLE_KEY
+
+# --- Generic supplier REST API default key (per-supplier keys live in D1
+# `suppliers.api_key_ref`; this is the mock/dev fallback) ---
+SUPPLIER_API_KEY=PLACEHOLDER__SUPPLIER_API_KEY
