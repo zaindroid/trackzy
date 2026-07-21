@@ -1,0 +1,22 @@
+From: Acme Supply Co Billing <billing@acmesupply.example.com>
+To: orders@demo-store.myshopify.com
+Subject: Invoice for order #AC-10293
+Message-ID: <acme-1001-invoice-001@acmesupply.example.com>
+Date: Wed, 16 Jul 2026 09:00:00 +0000
+Content-Type: multipart/mixed; boundary="ACMEBOUNDARY"
+MIME-Version: 1.0
+
+--ACMEBOUNDARY
+Content-Type: text/plain; charset="UTF-8"
+
+Please find attached your invoice for order #AC-10293.
+Payment terms: Net 30. No tracking information is included in this message.
+
+--ACMEBOUNDARY
+Content-Type: application/pdf; name="invoice-AC-10293.pdf"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="invoice-AC-10293.pdf"
+
+JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2cvUGFnZXMgMiAwIFI+PgplbmRv
+YmoKMiAwIG9iago8PC9UeXBlL1BhZ2VzL0tpZHNbM
+--ACMEBOUNDARY--

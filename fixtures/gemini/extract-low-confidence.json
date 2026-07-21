@@ -1,0 +1,8 @@
+{
+  "_comment": "Example structured output when Gemini could not find a tracking number at all (e.g. malformed-unmatched.eml) — trackingNumber omitted, low confidence.",
+  "trackingNumber": null,
+  "carrierDeclared": null,
+  "externalOrderRef": null,
+  "sku": null,
+  "confidence": 0.15
+}

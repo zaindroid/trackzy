@@ -1,0 +1,21 @@
+From: Acme Supply Co <shipping@acmesupply.example.com>
+To: orders@demo-store.myshopify.com
+Subject: Your order has shipped!
+Message-ID: <acme-1001-ship-001@acmesupply.example.com>
+Date: Wed, 16 Jul 2026 10:17:00 +0000
+Content-Type: text/plain; charset="UTF-8"
+MIME-Version: 1.0
+
+Order #AC-10293 has shipped!
+
+Tracking Number: 1Z999AA10123456780
+Carrier: UPS
+SKU: WIDGET-RED-L
+
+Thank you for your business.
+Acme Supply Co.
+
+--
+This is a re-delivery of a previous notification (retried by the mail
+provider); Message-ID is identical to acme-tracking.eml on purpose so the
+email ingestion path's dedup-by-Message-ID logic can be tested.

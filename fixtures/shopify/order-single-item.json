@@ -1,0 +1,20 @@
+{
+  "id": 5000000101,
+  "admin_graphql_api_id": "gid://shopify/Order/5000000101",
+  "name": "#1101",
+  "currency": "USD",
+  "subtotal_price": "44.50",
+  "total_shipping_price_set": {
+    "shop_money": { "amount": "5.99", "currency_code": "USD" }
+  },
+  "line_items": [
+    {
+      "id": 6000000201,
+      "admin_graphql_api_id": "gid://shopify/LineItem/6000000201",
+      "sku": "WIDGET-RED-L",
+      "title": "Widget - Red / Large",
+      "quantity": 1,
+      "price": "44.50"
+    }
+  ]
+}

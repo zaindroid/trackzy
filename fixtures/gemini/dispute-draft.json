@@ -1,0 +1,5 @@
+{
+  "_comment": "Example structured output from Gemini Flash for dispute-email drafting (packages/adapters/src/gemini/real.ts draftDispute), shaped by DISPUTE_SCHEMA.",
+  "subject": "Tracking inquiry for shipment 9200111899223197428499",
+  "body": "Hello,\n\nWe have not received a scan update for shipment 9200111899223197428499 since it was created 7 days ago. Could you confirm the current status or issue a replacement/refund if the package is lost?\n\nThank you,\nFulfillment Tracker"
+}

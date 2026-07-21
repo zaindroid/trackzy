@@ -1,0 +1,8 @@
+{
+  "_comment": "Example structured output from Gemini Flash for the email-extraction fallback (packages/adapters/src/gemini/real.ts), shaped by EXTRACT_SCHEMA. The real adapter parses exactly this JSON out of candidates[0].content.parts[0].text.",
+  "trackingNumber": "1Z999AA10123456780",
+  "carrierDeclared": "UPS",
+  "externalOrderRef": "AC-10293",
+  "sku": "WIDGET-RED-L",
+  "confidence": 0.94
+}

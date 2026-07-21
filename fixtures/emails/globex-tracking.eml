@@ -1,0 +1,16 @@
+From: Globex Goods Shipping <notify@shipping.globexgoods.example.com>
+To: orders@demo-store.myshopify.com
+Subject: Shipment Notification
+Message-ID: <globex-88213-ship-001@shipping.globexgoods.example.com>
+Date: Thu, 17 Jul 2026 14:30:00 +0000
+Content-Type: text/plain; charset="UTF-8"
+MIME-Version: 1.0
+
+Shipment Notification
+
+Order Ref: GX-88213
+Track your package: 9200111899223197428499
+Shipped via USPS
+
+We hope you enjoy your purchase.
+Globex Goods

@@ -1,0 +1,22 @@
+From: Globex Goods Billing <billing@shipping.globexgoods.example.com>
+To: orders@demo-store.myshopify.com
+Subject: Your Globex Goods invoice
+Message-ID: <globex-88213-invoice-001@shipping.globexgoods.example.com>
+Date: Thu, 17 Jul 2026 13:00:00 +0000
+Content-Type: multipart/mixed; boundary="GLOBEXBOUNDARY"
+MIME-Version: 1.0
+
+--GLOBEXBOUNDARY
+Content-Type: text/plain; charset="UTF-8"
+
+Attached is the invoice for Order Ref: GX-88213. This is a billing notice only;
+your shipment confirmation will arrive separately once your order ships.
+
+--GLOBEXBOUNDARY
+Content-Type: application/pdf; name="globex-invoice-GX-88213.pdf"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="globex-invoice-GX-88213.pdf"
+
+JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2cvUGFnZXMgMiAwIFI+PgplbmRv
+YmoKMiAwIG9iago8PC9UeXBlL1BhZ2VzL0tpZHNbM
+--GLOBEXBOUNDARY--
