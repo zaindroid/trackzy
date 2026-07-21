@@ -1,0 +1,465 @@
+import { writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { monotonicFactory } from 'ulid';
+
+/**
+ * Deterministic PRNG (mulberry32) so every `pnpm db:seed` run produces byte-
+ * identical IDs and SQL — required for the seed file to be diff-stable in git
+ * and for the demo dataset to be reproducible.
+ */
+function mulberry32(seed: number) {
+  let a = seed;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const prng = mulberry32(42);
+const ulid = monotonicFactory(prng);
+const BASE_TIME = Date.parse('2026-07-15T09:00:00.000Z');
+let tick = 0;
+function id(): string {
+  return ulid(BASE_TIME + tick++ * 1000);
+}
+function ts(offsetMinutes: number): number {
+  return BASE_TIME + offsetMinutes * 60_000;
+}
+
+function esc(value: string | number | null): string {
+  if (value === null) return 'NULL';
+  if (typeof value === 'number') return String(value);
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+type Row = Record<string, string | number | null>;
+
+function insert(table: string, rows: Row[]): string {
+  if (rows.length === 0) return '';
+  const columns = Object.keys(rows[0] as Row);
+  const values = rows
+    .map((row) => `  (${columns.map((c) => esc(row[c] ?? null)).join(', ')})`)
+    .join(',\n');
+  return `INSERT INTO ${table} (${columns.join(', ')})\nVALUES\n${values};`;
+}
+
+// ---------------------------------------------------------------------------
+// Demo dataset: 1 user, 1 storefront, 2 suppliers, 6 orders in varied states.
+// ---------------------------------------------------------------------------
+
+const userId = id();
+const storefrontId = id();
+const supplierAcmeId = id();
+const supplierGlobexId = id();
+
+const users: Row[] = [
+  { id: userId, clerk_user_id: 'dev-user', email: 'demo@fulfillment-tracker.dev', created_at: ts(0) },
+];
+
+const storefronts: Row[] = [
+  {
+    id: storefrontId,
+    user_id: userId,
+    platform: 'shopify',
+    shop_domain: 'demo-store.myshopify.com',
+    access_token_ref: 'env:SHOPIFY_ACCESS_TOKEN',
+    webhook_secret_ref: 'env:SHOPIFY_WEBHOOK_SECRET',
+    created_at: ts(0),
+  },
+];
+
+const suppliers: Row[] = [
+  {
+    id: supplierAcmeId,
+    user_id: userId,
+    name: 'Acme Supply Co',
+    api_base_url: 'https://api.acmesupply.example.com',
+    api_key_ref: 'env:SUPPLIER_API_KEY',
+    email_sender_pattern: '@acmesupply.example.com',
+    parser_id: 'acme-supply-v1',
+    active: 1,
+    created_at: ts(0),
+  },
+  {
+    id: supplierGlobexId,
+    user_id: userId,
+    name: 'Globex Goods',
+    api_base_url: 'https://api.globexgoods.example.com',
+    api_key_ref: 'env:SUPPLIER_API_KEY',
+    email_sender_pattern: '@shipping.globexgoods.example.com',
+    parser_id: 'globex-goods-v1',
+    active: 1,
+    created_at: ts(0),
+  },
+];
+
+const settings: Row[] = [
+  {
+    user_id: userId,
+    min_margin_cents: 200,
+    margin_mode: 'absolute',
+    min_margin_percent: 10,
+    auto_fulfill: 1,
+  },
+];
+
+const webhookEvents: Row[] = [];
+const orders: Row[] = [];
+const orderLineItems: Row[] = [];
+const fulfillments: Row[] = [];
+const fulfillmentLineItems: Row[] = [];
+const disputes: Row[] = [];
+
+function shopifyWebhookEvent(n: number, orderNumber: string, minutesAgo: number): string {
+  const weId = id();
+  webhookEvents.push({
+    id: weId,
+    source: 'shopify',
+    dedup_key: `wh-shopify-${n}`,
+    raw_body: JSON.stringify({ id: 5000000000 + n, name: orderNumber }),
+    headers_json: JSON.stringify({ 'x-shopify-webhook-id': `wh-shopify-${n}` }),
+    processed: 1,
+    error: null,
+    received_at: ts(minutesAgo),
+  });
+  return weId;
+}
+
+// --- Order 1: fully shipped, single line item, UPS tracking, pushed to Shopify ---
+{
+  const orderId = id();
+  const weId = shopifyWebhookEvent(1, '#1001', -600);
+  orders.push({
+    id: orderId,
+    storefront_id: storefrontId,
+    external_order_id: 'gid://shopify/Order/5000000001',
+    external_order_number: '#1001',
+    status: 'shipped',
+    currency: 'USD',
+    subtotal_cents: 8900,
+    shipping_cents: 599,
+    margin_cents: 2101,
+    raw_payload_id: weId,
+    created_at: ts(-600),
+    updated_at: ts(-540),
+  });
+  const li1 = id();
+  orderLineItems.push({
+    id: li1,
+    order_id: orderId,
+    external_line_item_id: 'gid://shopify/LineItem/1',
+    fulfillment_order_line_item_id: 'gid://shopify/FulfillmentOrderLineItem/1',
+    sku: 'WIDGET-RED-L',
+    title: 'Widget - Red / Large',
+    quantity: 2,
+    quantity_fulfilled: 2,
+    unit_price_cents: 4450,
+  });
+  const fId = id();
+  fulfillments.push({
+    id: fId,
+    order_id: orderId,
+    supplier_id: supplierAcmeId,
+    cost_cents: 5200,
+    tracking_number: '1Z999AA10123456780',
+    carrier_declared: 'UPS',
+    carrier_detected: 'UPS',
+    carrier_final: 'UPS',
+    tracking_status: 'in_transit',
+    pushed_to_storefront: 1,
+    source: 'regex',
+    created_at: ts(-580),
+    updated_at: ts(-540),
+  });
+  fulfillmentLineItems.push({ id: id(), fulfillment_id: fId, order_line_item_id: li1, quantity: 2 });
+}
+
+// --- Order 2: delivered ---
+{
+  const orderId = id();
+  const weId = shopifyWebhookEvent(2, '#1002', -1440);
+  orders.push({
+    id: orderId,
+    storefront_id: storefrontId,
+    external_order_id: 'gid://shopify/Order/5000000002',
+    external_order_number: '#1002',
+    status: 'delivered',
+    currency: 'USD',
+    subtotal_cents: 12000,
+    shipping_cents: 0,
+    margin_cents: 4300,
+    raw_payload_id: weId,
+    created_at: ts(-1440),
+    updated_at: ts(-100),
+  });
+  const li1 = id();
+  orderLineItems.push({
+    id: li1,
+    order_id: orderId,
+    external_line_item_id: 'gid://shopify/LineItem/2',
+    fulfillment_order_line_item_id: 'gid://shopify/FulfillmentOrderLineItem/2',
+    sku: 'GADGET-BLUE-M',
+    title: 'Gadget - Blue / Medium',
+    quantity: 1,
+    quantity_fulfilled: 1,
+    unit_price_cents: 12000,
+  });
+  const fId = id();
+  fulfillments.push({
+    id: fId,
+    order_id: orderId,
+    supplier_id: supplierGlobexId,
+    cost_cents: 7700,
+    tracking_number: '70123456789012345674',
+    carrier_declared: 'USPS',
+    carrier_detected: 'USPS',
+    carrier_final: 'USPS',
+    tracking_status: 'delivered',
+    pushed_to_storefront: 1,
+    source: 'regex',
+    created_at: ts(-1400),
+    updated_at: ts(-100),
+  });
+  fulfillmentLineItems.push({ id: id(), fulfillment_id: fId, order_line_item_id: li1, quantity: 1 });
+}
+
+// --- Order 3: partially shipped, 2 line items, one fulfilled, one still pending ---
+{
+  const orderId = id();
+  const weId = shopifyWebhookEvent(3, '#1003', -300);
+  orders.push({
+    id: orderId,
+    storefront_id: storefrontId,
+    external_order_id: 'gid://shopify/Order/5000000003',
+    external_order_number: '#1003',
+    status: 'partially_shipped',
+    currency: 'USD',
+    subtotal_cents: 15600,
+    shipping_cents: 800,
+    margin_cents: 3900,
+    raw_payload_id: weId,
+    created_at: ts(-300),
+    updated_at: ts(-250),
+  });
+  const li1 = id();
+  const li2 = id();
+  orderLineItems.push(
+    {
+      id: li1,
+      order_id: orderId,
+      external_line_item_id: 'gid://shopify/LineItem/3',
+      fulfillment_order_line_item_id: 'gid://shopify/FulfillmentOrderLineItem/3',
+      sku: 'WIDGET-RED-L',
+      title: 'Widget - Red / Large',
+      quantity: 1,
+      quantity_fulfilled: 1,
+      unit_price_cents: 4450,
+    },
+    {
+      id: li2,
+      order_id: orderId,
+      external_line_item_id: 'gid://shopify/LineItem/4',
+      fulfillment_order_line_item_id: 'gid://shopify/FulfillmentOrderLineItem/4',
+      sku: 'GIZMO-GREEN-S',
+      title: 'Gizmo - Green / Small',
+      quantity: 2,
+      quantity_fulfilled: 0,
+      unit_price_cents: 5575,
+    },
+  );
+  const fId = id();
+  fulfillments.push({
+    id: fId,
+    order_id: orderId,
+    supplier_id: supplierAcmeId,
+    cost_cents: 3100,
+    tracking_number: '1Z1A2B3C4D5E6F7G82',
+    carrier_declared: 'UPS',
+    carrier_detected: 'UPS',
+    carrier_final: 'UPS',
+    tracking_status: 'in_transit',
+    pushed_to_storefront: 1,
+    source: 'regex',
+    created_at: ts(-280),
+    updated_at: ts(-250),
+  });
+  fulfillmentLineItems.push({ id: id(), fulfillment_id: fId, order_line_item_id: li1, quantity: 1 });
+}
+
+// --- Order 4: fulfilling, supplier order placed, no tracking yet ---
+{
+  const orderId = id();
+  const weId = shopifyWebhookEvent(4, '#1004', -60);
+  orders.push({
+    id: orderId,
+    storefront_id: storefrontId,
+    external_order_id: 'gid://shopify/Order/5000000004',
+    external_order_number: '#1004',
+    status: 'fulfilling',
+    currency: 'USD',
+    subtotal_cents: 6700,
+    shipping_cents: 500,
+    margin_cents: 2100,
+    raw_payload_id: weId,
+    created_at: ts(-60),
+    updated_at: ts(-30),
+  });
+  const li1 = id();
+  orderLineItems.push({
+    id: li1,
+    order_id: orderId,
+    external_line_item_id: 'gid://shopify/LineItem/5',
+    fulfillment_order_line_item_id: 'gid://shopify/FulfillmentOrderLineItem/5',
+    sku: 'GADGET-BLUE-M',
+    title: 'Gadget - Blue / Medium',
+    quantity: 1,
+    quantity_fulfilled: 0,
+    unit_price_cents: 6700,
+  });
+  const fId = id();
+  fulfillments.push({
+    id: fId,
+    order_id: orderId,
+    supplier_id: supplierGlobexId,
+    cost_cents: 4100,
+    tracking_number: null,
+    carrier_declared: null,
+    carrier_detected: null,
+    carrier_final: null,
+    tracking_status: 'pending',
+    pushed_to_storefront: 0,
+    source: 'supplier_api',
+    created_at: ts(-30),
+    updated_at: ts(-30),
+  });
+}
+
+// --- Order 5: exception, ambiguous carrier needs review, open dispute ---
+{
+  const orderId = id();
+  const weId = shopifyWebhookEvent(5, '#1005', -2880);
+  orders.push({
+    id: orderId,
+    storefront_id: storefrontId,
+    external_order_id: 'gid://shopify/Order/5000000005',
+    external_order_number: '#1005',
+    status: 'exception',
+    currency: 'USD',
+    subtotal_cents: 9900,
+    shipping_cents: 650,
+    margin_cents: 3050,
+    raw_payload_id: weId,
+    created_at: ts(-2880),
+    updated_at: ts(-1500),
+  });
+  const li1 = id();
+  orderLineItems.push({
+    id: li1,
+    order_id: orderId,
+    external_line_item_id: 'gid://shopify/LineItem/6',
+    fulfillment_order_line_item_id: 'gid://shopify/FulfillmentOrderLineItem/6',
+    sku: 'GIZMO-GREEN-S',
+    title: 'Gizmo - Green / Small',
+    quantity: 1,
+    quantity_fulfilled: 0,
+    unit_price_cents: 9900,
+  });
+  const fId = id();
+  fulfillments.push({
+    id: fId,
+    order_id: orderId,
+    supplier_id: supplierGlobexId,
+    cost_cents: 6200,
+    tracking_number: '9200111899223197428499',
+    carrier_declared: null,
+    carrier_detected: 'USPS',
+    carrier_final: null,
+    tracking_status: 'needs_review',
+    pushed_to_storefront: 0,
+    source: 'gemini',
+    created_at: ts(-1600),
+    updated_at: ts(-1500),
+  });
+  disputes.push({
+    id: id(),
+    fulfillment_id: fId,
+    reason: 'No tracking status update from carrier for 7 days after label creation.',
+    draft_subject: 'Tracking inquiry for shipment 9200111899223197428499',
+    draft_body:
+      'Hello,\n\nWe have not received a scan update for shipment 9200111899223197428499 since it was ' +
+      'created 7 days ago. Could you confirm the current status or issue a replacement/refund if the ' +
+      'package is lost?\n\nThank you,\nFulfillment Tracker',
+    status: 'draft',
+    created_at: ts(-1500),
+    updated_at: ts(-1500),
+  });
+}
+
+// --- Order 6: rejected, margin below threshold, never fulfilled ---
+{
+  const orderId = id();
+  const weId = shopifyWebhookEvent(6, '#1006', -120);
+  orders.push({
+    id: orderId,
+    storefront_id: storefrontId,
+    external_order_id: 'gid://shopify/Order/5000000006',
+    external_order_number: '#1006',
+    status: 'rejected',
+    currency: 'USD',
+    subtotal_cents: 3200,
+    shipping_cents: 400,
+    margin_cents: -150,
+    raw_payload_id: weId,
+    created_at: ts(-120),
+    updated_at: ts(-115),
+  });
+  orderLineItems.push({
+    id: id(),
+    order_id: orderId,
+    external_line_item_id: 'gid://shopify/LineItem/7',
+    fulfillment_order_line_item_id: null,
+    sku: 'WIDGET-RED-L',
+    title: 'Widget - Red / Large',
+    quantity: 1,
+    quantity_fulfilled: 0,
+    unit_price_cents: 3200,
+  });
+}
+
+// A malformed/unmatched supplier email — surfaces in the "Needs review" list.
+webhookEvents.push({
+  id: id(),
+  source: 'email',
+  dedup_key: '<msg-malformed-0007@mail.unknown-supplier.example.com>',
+  raw_body: 'From: noreply@unknown-supplier.example.com\nSubject: Re: your package\n\nThanks for your order!',
+  headers_json: JSON.stringify({ from: 'noreply@unknown-supplier.example.com' }),
+  processed: 1,
+  error: 'No supplier matched sender address; Gemini fallback confidence 0.31 (< 0.8 threshold)',
+  received_at: ts(-200),
+});
+
+const sql = [
+  'PRAGMA foreign_keys = ON;',
+  'BEGIN TRANSACTION;',
+  insert('users', users),
+  insert('storefronts', storefronts),
+  insert('suppliers', suppliers),
+  insert('settings', settings),
+  insert('webhook_events', webhookEvents),
+  insert('orders', orders),
+  insert('order_line_items', orderLineItems),
+  insert('fulfillments', fulfillments),
+  insert('fulfillment_line_items', fulfillmentLineItems),
+  insert('disputes', disputes),
+  'COMMIT;',
+]
+  .filter(Boolean)
+  .join('\n\n');
+
+const outPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'seed.sql');
+writeFileSync(outPath, sql + '\n');
+console.log(`Wrote ${outPath}`);
