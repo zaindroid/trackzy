@@ -58,3 +58,29 @@ Autonomous build session. Every non-obvious choice made without a human in the l
   order also carries an open `disputes` row and a `needs_review` fulfillment (ambiguous 92-prefixed USPS
   number, no declared carrier) so the Disputes and Fulfillments "Needs review" pages aren't empty either;
   a malformed/unmatched supplier email is seeded into `webhook_events` for the email "Needs review" list.
+
+## Milestone 4 — adapters + fixtures
+- Multi-tenant config (Shopify `shopDomain`, supplier `baseUrl`) is passed per-call rather than baked into
+  the adapter at construction time, mirroring how `storefronts`/`suppliers` rows carry that config in D1
+  while `createX(env)` only has access to process-wide secrets/flags. Secrets stay in the factory closure;
+  non-secret per-tenant routing info is a method parameter. This keeps a single adapter instance reusable
+  across all of a user's storefronts/suppliers.
+- `SessionVerifier.verifySession` returns `{ clerkUserId }` only, not an internal `users.id` — resolving
+  Clerk's external id to our own primary key is a D1 lookup, which belongs in the Worker's auth middleware
+  (milestone 7), not inside the adapter. Keeps the adapters package free of any dependency on `@fulfillment-tracker/db`.
+- `MockGeminiExtractor` does not read canned fixtures from `fixtures/gemini/*.json` — those files exist as
+  documentation of the exact structured-output shape the real Gemini adapter parses (useful for the
+  DEPLOY.md Gemini setup step and for anyone wiring a real key), but the mock itself scans for any
+  carrier-shaped token via regex. This makes it a genuine (if simplified) extraction fallback that behaves
+  sensibly on arbitrary/malformed email fixtures instead of only ever returning one hardcoded canned reply,
+  which was needed to make "malformed email falls through to Gemini path" an actually meaningful test.
+- HMAC verification (`packages/adapters/src/hmac.ts`) lives in the adapters package, not core, because it
+  uses the Workers/Web Crypto global (`crypto.subtle`) rather than being pure portable logic — it's shared
+  by the Shopify webhook route and is available for the 17TRACK route if/when a real signature scheme is
+  wired up (17TRACK's own webhook push notifications are not documented as HMAC-signed in their public
+  docs at the time of writing; DEPLOY.md flags this for human verification against the live 17TRACK
+  account before production use).
+- Email fixtures: two suppliers (Acme, Globex) each get a shipping-notification email (parses cleanly) and
+  an invoice/billing email (must NOT produce a false-positive tracking match), plus one sender-unmatched
+  email with no tracking-shaped text (exercises the "nothing worked, needs review" path end-to-end) and one
+  exact-Message-ID duplicate of the Acme tracking email (exercises `webhook_events` dedup on re-delivery).
