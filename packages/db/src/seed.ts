@@ -65,7 +65,16 @@ const supplierCjId = id();
 const supplierManualAmazonRetailId = id();
 
 const users: Row[] = [
-  { id: userId, clerk_user_id: 'dev-user', email: 'demo@fulfillment-tracker.dev', created_at: ts(0) },
+  {
+    id: userId,
+    clerk_user_id: 'dev-user',
+    email: 'demo@fulfillment-tracker.dev',
+    created_at: ts(0),
+    gmail_refresh_token_ref: 'env:GMAIL_OAUTH_REFRESH_TOKEN',
+    gmail_access_token_ref: 'env:GMAIL_OAUTH_ACCESS_TOKEN',
+    gmail_token_expires_at: ts(60),
+    gmail_last_polled_at: ts(-5),
+  },
 ];
 
 const storefronts: Row[] = [

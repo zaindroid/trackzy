@@ -2,9 +2,9 @@ PRAGMA foreign_keys = ON;
 
 BEGIN TRANSACTION;
 
-INSERT INTO users (id, clerk_user_id, email, created_at)
+INSERT INTO users (id, clerk_user_id, email, created_at, gmail_refresh_token_ref, gmail_access_token_ref, gmail_token_expires_at, gmail_last_polled_at)
 VALUES
-  ('01KXJG27M0G69QW7FVK8G5NVEK', 'dev-user', 'demo@fulfillment-tracker.dev', 1784106000000);
+  ('01KXJG27M0G69QW7FVK8G5NVEK', 'dev-user', 'demo@fulfillment-tracker.dev', 1784106000000, 'env:GMAIL_OAUTH_REFRESH_TOKEN', 'env:GMAIL_OAUTH_ACCESS_TOKEN', 1784109600000, 1784105700000);
 
 INSERT INTO storefronts (id, user_id, platform, shop_domain, access_token_ref, webhook_secret_ref, created_at, marketplace_id, oauth_refresh_token_ref, oauth_access_token_ref, oauth_expires_at, last_polled_at, non_api_mode)
 VALUES

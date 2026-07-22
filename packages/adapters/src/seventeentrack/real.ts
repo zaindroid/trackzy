@@ -7,6 +7,8 @@ const CARRIER_CODE: Record<Carrier, number> = {
   USPS: 21051,
   FEDEX: 100003,
   DHL: 100001,
+  // TODO(HUMAN): verify against 17TRACK's live carrier list once registered — see DEPLOY.md.
+  AMZL: 100026,
 };
 
 const CARRIER_BY_CODE: Record<number, Carrier> = Object.fromEntries(

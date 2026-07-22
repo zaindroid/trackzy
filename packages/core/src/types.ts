@@ -1,4 +1,4 @@
-export type Carrier = 'UPS' | 'USPS' | 'FEDEX' | 'DHL';
+export type Carrier = 'UPS' | 'USPS' | 'FEDEX' | 'DHL' | 'AMZL';
 
 export type OrderStatus =
   | 'received'

@@ -24,4 +24,25 @@ export interface Env {
   CLERK_SECRET_KEY?: string;
   CLERK_PUBLISHABLE_KEY?: string;
   SUPPLIER_API_KEY?: string;
+
+  // Phase 2 secrets (see .dev.vars.example)
+  EBAY_CLIENT_ID?: string;
+  EBAY_CLIENT_SECRET?: string;
+  EBAY_OAUTH_ACCESS_TOKEN?: string;
+  EBAY_OAUTH_REFRESH_TOKEN?: string;
+  AMAZON_LWA_CLIENT_ID?: string;
+  AMAZON_LWA_CLIENT_SECRET?: string;
+  AMAZON_MARKETPLACE_ID?: string;
+  AMAZON_SELLER_ID?: string;
+  AMAZON_OAUTH_ACCESS_TOKEN?: string;
+  AMAZON_OAUTH_REFRESH_TOKEN?: string;
+  AMAZON_BUSINESS_API_KEY?: string;
+  ALIEXPRESS_APP_KEY?: string;
+  ALIEXPRESS_APP_SECRET?: string;
+  CJ_API_KEY?: string;
+  GMAIL_CLIENT_ID?: string;
+  GMAIL_CLIENT_SECRET?: string;
+  GMAIL_OAUTH_ACCESS_TOKEN?: string;
+  GMAIL_OAUTH_REFRESH_TOKEN?: string;
+  BLUECARE_EXPRESS_API_KEY?: string;
 }

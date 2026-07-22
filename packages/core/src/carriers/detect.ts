@@ -3,8 +3,9 @@ import { isValidUPS } from './ups.js';
 import { isValidUSPS, hasAmbiguousUspsPrefix } from './usps.js';
 import { isValidFedEx } from './fedex.js';
 import { isValidDHL } from './dhl.js';
+import { isValidAMZL } from './amzl.js';
 
-export { isValidUPS, isValidUSPS, isValidFedEx, isValidDHL, hasAmbiguousUspsPrefix };
+export { isValidUPS, isValidUSPS, isValidFedEx, isValidDHL, isValidAMZL, hasAmbiguousUspsPrefix };
 
 export function validateCarrier(carrier: Carrier, trackingNumber: string): CarrierValidationResult {
   switch (carrier) {
@@ -16,18 +17,21 @@ export function validateCarrier(carrier: Carrier, trackingNumber: string): Carri
       return isValidFedEx(trackingNumber);
     case 'DHL':
       return isValidDHL(trackingNumber);
+    case 'AMZL':
+      return isValidAMZL(trackingNumber);
   }
 }
 
 /**
  * Carrier detection chain (spec section 6c). Priority:
  *  1. carrierDeclared, if its own checksum/format passes.
- *  2. UPS (1Z + mod-10 checksum).
- *  3. USPS (20/22 digit + mod-10 checksum) — 92-95 prefixed numbers are
+ *  2. AMZL ("TBA" + 12 digits, format-only — weak, but an unambiguous prefix).
+ *  3. UPS (1Z + mod-10 checksum).
+ *  4. USPS (20/22 digit + mod-10 checksum) — 92-95 prefixed numbers are
  *     ambiguous with FedEx SmartPost / UPS SurePost when nothing was declared.
- *  4. DHL AWB (10 digit + mod-7 checksum).
- *  5. FedEx (12/15 digit, format-only — weak) / DHL eCommerce (JD-prefixed, format-only — weak).
- *  6. Nothing matched -> needs_review, carrier_final stays null.
+ *  5. DHL AWB (10 digit + mod-7 checksum).
+ *  6. FedEx (12/15 digit, format-only — weak) / DHL eCommerce (JD-prefixed, format-only — weak).
+ *  7. Nothing matched -> needs_review, carrier_final stays null.
  */
 export function detectCarrier(
   trackingNumber: string,
@@ -48,6 +52,18 @@ export function detectCarrier(
       };
     }
     // Declared carrier failed its own validation: fall through to auto-detection.
+  }
+
+  const amzl = isValidAMZL(trackingNumber);
+  if (amzl.valid) {
+    return {
+      carrierDeclared: declared,
+      carrierDetected: 'AMZL',
+      carrierFinal: 'AMZL',
+      ambiguous: false,
+      weak: true,
+      needsReview: false,
+    };
   }
 
   const ups = isValidUPS(trackingNumber);

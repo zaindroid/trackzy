@@ -4,6 +4,7 @@ import { createDb, orders, orderLineItems, storefronts, webhookEvents } from '@f
 import { eq } from 'drizzle-orm';
 import type { Env } from '../env.js';
 import { newId, now } from '../lib/id.js';
+import { resolveSecretRef } from '../lib/secretRef.js';
 
 interface ShopifyOrderPayload {
   id: number;
@@ -131,14 +132,6 @@ app.post('/', async (c) => {
 
   return c.json({ ok: true, orderId });
 });
-
-function resolveSecretRef(ref: string, env: Env): string {
-  if (ref.startsWith('env:')) {
-    const key = ref.slice('env:'.length) as keyof Env;
-    return (env[key] as string | undefined) ?? '';
-  }
-  return ref;
-}
 
 function isUniqueConstraintError(err: unknown): boolean {
   return err instanceof Error && /UNIQUE constraint failed/i.test(err.message);

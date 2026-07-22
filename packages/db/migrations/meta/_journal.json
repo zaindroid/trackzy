@@ -15,6 +15,13 @@
       "when": 1784758149582,
       "tag": "0001_overjoyed_kree",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784759357434,
+      "tag": "0002_sticky_warpath",
+      "breakpoints": true
     }
   ]
 }

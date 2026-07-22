@@ -6,6 +6,15 @@ export const users = sqliteTable('users', {
   clerkUserId: text('clerk_user_id').notNull().unique(),
   email: text('email').notNull(),
   createdAt: integer('created_at').notNull(),
+  // --- phase 2: connected Gmail inbox for the supplier-email polling pipeline ---
+  // Not a `storefronts` row (Gmail isn't a marketplace/storefront) and not
+  // listed in the spec's own schema-additions section, since Gmail
+  // connection is a per-user resource with no other natural table to live
+  // on — see DECISIONS.md.
+  gmailRefreshTokenRef: text('gmail_refresh_token_ref'),
+  gmailAccessTokenRef: text('gmail_access_token_ref'),
+  gmailTokenExpiresAt: integer('gmail_token_expires_at'),
+  gmailLastPolledAt: integer('gmail_last_polled_at'),
 });
 
 export const storefronts = sqliteTable(

@@ -467,3 +467,46 @@ before each `phase2(N)` commit.
   `SupplierClient` or the manual-task flow instead, not this new interface) — this factory is what the
   catalog-scoring milestone (8) will call to fetch competing offers across suppliers for a given
   listing.
+
+## Milestone 5 — Gmail OAuth ingestion pipeline + extraction logic
+- **Extended `Carrier` with `'AMZL'` (Amazon Logistics) in `packages/core`, ahead of milestone 7's
+  tracking-proxy work**, because `parseAmazonRetail`'s output needed to type-check *now* — the parser
+  declares `carrierDeclared: 'AMZL'` when the source email says "Carrier: Amazon Logistics", and that's
+  a genuine carrier-detection primitive (a `TBA` + 12-digit format validator, weak/format-only like
+  FedEx, since Amazon publishes no checksum) that belongs in `packages/core/src/carriers` alongside
+  UPS/USPS/FedEx/DHL regardless of which milestone needed it first. `detectCarrier`'s chain now checks
+  AMZL right after the declared-carrier check (its `TBA` prefix is as unambiguous as UPS's `1Z`).
+  17TRACK's real adapter's `Record<Carrier, number>` carrier-code map had to gain an `AMZL` entry to keep
+  typechecking — filled in with a plausible code and the same `TODO(HUMAN): verify against live` caveat
+  already used for entries added in Phase 1.
+- **`extractTrackingCandidate` (regex-parser-first, Gemini-fallback) was pulled out of `email.ts` into
+  `apps/worker/src/lib/extractTrackingCandidate.ts`**, and `resolveSecretRef` out of
+  `webhooks.shopify.ts` into `apps/worker/src/lib/secretRef.ts` — both were private, single-use helpers
+  in Phase 1 that Gmail ingestion now needs identically. This is the literal "reuse, don't rewrite"
+  instruction: `email.ts` and `gmailIngestion.ts` now both call the same two shared functions rather
+  than each carrying its own copy, and `email.ts`'s existing tests were left untouched (still green)
+  since the refactor is a pure extraction with no behavior change.
+- **Gmail OAuth tokens live on `users`, not a new table** (`gmailRefreshTokenRef`, `gmailAccessTokenRef`,
+  `gmailTokenExpiresAt`, `gmailLastPolledAt` — all nullable, so the migration is a plain multi-column
+  `ALTER TABLE ADD` with no table recreation needed). Gmail is a per-*user* connected inbox, not a
+  marketplace/storefront and not scoped to any one supplier, so neither `storefronts` (already extended
+  with OAuth fields in milestone 1, but conceptually "a marketplace connection") nor a new table fit as
+  well as extending `users` the same way `storefronts` was already extended.
+- **Gmail-sourced tracking resolution reuses the exact same FIFO-per-supplier heuristic** Phase 1's
+  `email.ts` established ("oldest fulfillment for this supplier still awaiting tracking") rather than
+  inventing a more precise correlation — consistent with the instruction to reuse existing conventions,
+  and appropriate since spec section 6b groups Gmail polling with inbound email as one ingestion family
+  rather than asking for a different correlation strategy.
+- **Scheduling: one `scheduled()` export, dispatching on `event.cron`** (`apps/worker/src/scheduled.ts`),
+  rather than a Workflow — Gmail polling is a fixed-interval sweep with no per-message durable state to
+  track across steps, which is exactly what a Cron Trigger is for; Workflows are for the *fulfillment
+  order lifecycle's* durable multi-day state, not a "run this function every 5 minutes" scheduler. The
+  dispatch-on-`event.cron` shape is deliberate: Workers only allows one `scheduled` export per Worker, so
+  milestone 8's hourly repricing sweep will extend this same function with a second `if (event.cron ===
+  ...)` branch rather than needing a second entry point.
+- **Testing avoids invoking the Workers-level `scheduled()` trigger machinery entirely** — `pollGmailForUser`
+  (the actual logic) is unit-tested directly against the real D1 test database, exactly like
+  `runOrderWorkflow`/`runDisputeWorkflow` in Phase 1's milestone 6. This sidesteps needing
+  `vitest-pool-workers`' `SELF.scheduled()` helper and keeps the test asserting on behavior
+  (fulfillment resolved, webhook_events deduped, cursor advanced) rather than on Workers runtime
+  plumbing.

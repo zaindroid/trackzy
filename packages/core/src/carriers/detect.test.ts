@@ -7,6 +7,7 @@ const VALID_USPS_PLAIN = '70123456789012345674';
 const VALID_FEDEX = '123456789012345';
 const VALID_DHL_AWB = '1234567891';
 const VALID_DHL_JD = 'JD12345678901234567';
+const VALID_AMZL = 'TBA123456789012';
 
 describe('detectCarrier', () => {
   it('detects UPS from format + checksum, unambiguous', () => {
@@ -66,6 +67,13 @@ describe('detectCarrier', () => {
     const result = detectCarrier(VALID_DHL_AWB, 'UPS');
     expect(result.carrierDeclared).toBe('UPS');
     expect(result.carrierFinal).toBe('DHL');
+  });
+
+  it('detects AMZL (Amazon Logistics) as a weak, format-only match', () => {
+    const result = detectCarrier(VALID_AMZL);
+    expect(result.carrierFinal).toBe('AMZL');
+    expect(result.weak).toBe(true);
+    expect(result.needsReview).toBe(false);
   });
 
   it('needs review when nothing matches any known format', () => {

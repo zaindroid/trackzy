@@ -46,3 +46,6 @@ ENVIRONMENT = "test"
 
 [[send_email]]
 name = "DISPUTE_EMAIL"
+
+[triggers]
+crons = ["*/5 * * * *"]

@@ -1,11 +1,11 @@
 import PostalMime from 'postal-mime';
 import { createDb, fulfillments, suppliers, webhookEvents } from '@fulfillment-tracker/db';
 import { and, eq, isNull } from 'drizzle-orm';
-import { detectCarrier, getParser, REGEX_CONFIDENCE_THRESHOLD, type TrackingCandidate } from '@fulfillment-tracker/core';
-import { createGeminiExtractor } from '@fulfillment-tracker/adapters/gemini';
+import { detectCarrier } from '@fulfillment-tracker/core';
 import type { Env } from './env.js';
 import { newId, now } from './lib/id.js';
 import { safeGetWorkflowInstance } from './lib/workflow.js';
+import { extractTrackingCandidate } from './lib/extractTrackingCandidate.js';
 import type { TrackingReceivedEvent } from './workflows/types.js';
 
 /**
@@ -42,7 +42,7 @@ export async function handleEmail(message: ForwardableEmailMessage, env: Env): P
     fromAddress.toLowerCase().includes(s.emailSenderPattern.toLowerCase()),
   );
 
-  const { candidate, source, error: extractionError } = await extractCandidate({
+  const { candidate, source, error: extractionError } = await extractTrackingCandidate({
     env,
     subject,
     text,
@@ -119,37 +119,6 @@ export async function handleEmail(message: ForwardableEmailMessage, env: Env): P
     };
     await instance?.sendEvent({ type: 'tracking-received', payload: event });
   }
-}
-
-async function extractCandidate(input: {
-  env: Env;
-  subject: string;
-  text: string;
-  supplierName?: string;
-  parserId?: string;
-}): Promise<{ candidate: TrackingCandidate | null; source: 'regex' | 'gemini'; error: string | null }> {
-  if (input.parserId) {
-    const parser = getParser(input.parserId);
-    const parseResult = parser?.({ subject: input.subject, text: input.text });
-    if (parseResult && parseResult.confidence >= REGEX_CONFIDENCE_THRESHOLD && parseResult.candidate) {
-      return { candidate: parseResult.candidate, source: 'regex', error: null };
-    }
-  }
-
-  const gemini = createGeminiExtractor(input.env);
-  const geminiResult = await gemini.extractTracking({
-    subject: input.subject,
-    text: input.text,
-    supplierName: input.supplierName,
-  });
-  if (geminiResult.confidence >= REGEX_CONFIDENCE_THRESHOLD && geminiResult.candidate) {
-    return { candidate: geminiResult.candidate, source: 'gemini', error: null };
-  }
-
-  const error = input.parserId
-    ? `Parser '${input.parserId}' did not match; Gemini fallback confidence ${geminiResult.confidence.toFixed(2)} (< ${REGEX_CONFIDENCE_THRESHOLD} threshold)`
-    : `No supplier matched sender address; Gemini fallback confidence ${geminiResult.confidence.toFixed(2)} (< ${REGEX_CONFIDENCE_THRESHOLD} threshold)`;
-  return { candidate: null, source: 'gemini', error };
 }
 
 async function streamToArrayBuffer(stream: ReadableStream<Uint8Array>): Promise<ArrayBuffer> {

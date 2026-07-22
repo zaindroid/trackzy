@@ -5,6 +5,7 @@ import trackingWebhook from './routes/webhooks.tracking.js';
 import apiRoutes from './routes/api/index.js';
 import { handleEmail } from './email.js';
 import { handleQueue } from './queue.js';
+import { handleScheduled } from './scheduled.js';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -23,4 +24,5 @@ export default {
   fetch: app.fetch,
   email: handleEmail,
   queue: handleQueue,
+  scheduled: handleScheduled,
 };

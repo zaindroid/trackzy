@@ -62,3 +62,8 @@ ENVIRONMENT = "production"
 # for inbound; `send_email` below is for outbound (dispute email sending, mocked).
 [[send_email]]
 name = "DISPUTE_EMAIL"
+
+# Gmail inbox polling (spec 6b) — every 5 minutes. Keep in sync with
+# apps/worker/src/scheduled.ts's GMAIL_POLL_CRON constant.
+[triggers]
+crons = ["*/5 * * * *"]
