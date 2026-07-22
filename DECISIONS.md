@@ -189,3 +189,35 @@ Autonomous build session. Every non-obvious choice made without a human in the l
   `authMiddleware` to everything via `app.use('*', ...)` as its first line) — it's registered directly on
   the top-level Hono app in `index.ts`, before `/api` is mounted, so there's no ambiguity about whether a
   wildcard auth middleware registered after a sibling route actually covers it.
+
+## Milestone 8 — dashboard
+- Auth is a single React Context (`apps/dashboard/src/lib/auth.tsx`) with two possible providers:
+  `MockAuthProvider` (default — shows "Continue as dev user", stores the literal string `dev-user` as
+  the bearer token, matching `MockSessionVerifier`'s convention) or `ClerkAuthProvider`
+  (`clerkAuth.tsx`, only lazy-loaded via dynamic `import()` when `VITE_CLERK_PUBLISHABLE_KEY` is set to
+  a real-looking key). Both providers feed the *same* `AuthContext` defined once in `auth.tsx` — an
+  earlier draft defined a second, separate context inside `clerkAuth.tsx`, which would have made
+  `useAuthToken()` resolve to whichever context happened to be nearest in the tree rather than
+  reliably pick up whichever provider is actually mounted; consolidated to one context so every page
+  component only ever imports `useAuthToken` from `lib/auth.js` regardless of which auth mode is live.
+- `@clerk/clerk-react` is a real dependency (spec section 3 requires it), but it's never imported by
+  the default code path — `main.tsx` only `await import('./lib/clerkAuth.js')`s when
+  `CLERK_CONFIGURED` is true, so the ~83KB Clerk chunk (visible as its own chunk in the `vite build`
+  output) is never fetched by a browser running in mock mode.
+- The API client (`lib/api.ts`) is a thin typed `fetch` wrapper, not a generated client — the response
+  shapes are hand-typed to mirror the Worker's actual JSON envelopes (`{ orders: [...] }`,
+  `{ error: { code, message } }`, etc.) rather than sharing types through a package boundary, since
+  `apps/dashboard` and `apps/worker` are independent deployables (one ships to the browser, one to the
+  edge) and spec section 4 doesn't list a shared `types` package between them. `TrackingCandidate` is
+  the one exception — imported directly from `@fulfillment-tracker/core` in `SupplierDetail.tsx` for
+  the live parser-test result shape, since `core` has zero Cloudflare-specific dependencies and is
+  safe to bundle into a browser build.
+- Settings page's "Storefront & API keys" section is deliberately read-only, pointing at DEPLOY.md's
+  `wrangler secret put` commands instead of offering in-browser credential entry — spec section 5's
+  schema stores `access_token_ref`/`webhook_secret_ref`/`api_key_ref` as *pointers*, not raw secrets,
+  specifically so real credentials never pass through the browser or land in D1; building a UI that
+  invited pasting a real Shopify token into a form would undermine that design.
+- Test-mode `fetch` is stubbed per-test with `vi.stubGlobal('fetch', ...)` rather than MSW or a real
+  network layer — no new dependency needed, and it keeps the two required frontend tests (Orders table
+  renders seed data; Needs-review resolve flow calls PATCH) fast and deterministic while still
+  asserting on the exact request body sent to `PATCH /api/fulfillments/:id`.
