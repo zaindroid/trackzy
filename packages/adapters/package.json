@@ -17,7 +17,8 @@
     "./rateLimit": "./src/rateLimit.ts",
     "./orderSource": "./src/orderSource/iface.ts",
     "./ebay": "./src/ebay/index.ts",
-    "./amazon": "./src/amazon/index.ts"
+    "./amazon": "./src/amazon/index.ts",
+    "./supplierApi": "./src/supplierApi/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

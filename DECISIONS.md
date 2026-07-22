@@ -435,3 +435,35 @@ before each `phase2(N)` commit.
   field shapes are approximate (Amazon's actual JSON structure for `purchasable_offer`/
   `fulfillment_availability` attributes varies by product type schema); flagged as another
   `TODO(HUMAN)` verification item.
+
+## Milestone 4 — Supplier API Adapters (Amazon Business, AliExpress, CJ)
+- **New `SupplierApiClient` interface (`packages/adapters/src/supplierApi/iface.ts`), separate from
+  Phase 1's existing `SupplierClient`** (`packages/adapters/src/suppliers`) — same reasoning as the
+  Shopify/OrderSource split in milestone 2. Phase 1's `SupplierClient.getPrice/createOrder` pair keeps
+  serving the existing, already-tested, already-deployed `OrderWorkflow` fulfillment path untouched.
+  The new interface (`searchProduct`, `getOffer`, `createOrder`, `getTracking`) is what spec section 6
+  actually asks for and Phase 1's interface has no room for (no product search, no stock/ship-day
+  signal, no tracking lookup) — extending Phase 1's interface in place would have meant either breaking
+  its two existing call sites in `orderLogic.ts` or bolting on four unrelated optional methods that
+  existing suppliers (Acme/Globex, both `provider: 'generic_rest'`) don't implement.
+- **AliExpress's HMAC-SHA256 request signing is pulled into its own pure module** (`sign.ts`) purely so
+  it's independently unit-testable without any network mocking — sorting-independence (same signature
+  regardless of input object key order, since the function sorts before concatenating), per-field
+  sensitivity (any single value change flips the signature), and secret-sensitivity are all asserted
+  directly. This is the same "isolate the one genuinely risky/distinctive piece of logic and test it in
+  isolation" approach used for Amazon's RDT flow in milestone 3.
+- **CJ Dropshipping's `CJ-Access-Token` is taken as a pre-obtained secret (`CJ_API_KEY`), not fetched by
+  this adapter via CJ's email+password login endpoint.** CJ's token is long-lived (~15 days per their
+  docs) rather than a short-lived OAuth access token needing per-request refresh logic like eBay/Amazon,
+  so there's no ongoing refresh mechanics to build — and keeping the actual account password out of the
+  Worker's request path entirely (obtained once, out-of-band, by a human) is simply safer. Documented as
+  a `TODO(HUMAN)` in DEPLOY.md alongside the other credential-acquisition steps.
+- **All three real adapters reuse `packages/adapters/src/rateLimit.ts` from milestone 2 as-is** — no new
+  rate-limiting code was written, confirming the shared utility's design goal (write once, every real
+  marketplace/supplier adapter reuses it) actually held up in practice.
+- **`createSupplierApiClient(provider, env)` dispatches on the exact same `suppliers.provider` enum
+  values** added to the schema in milestone 1 (`'amazon_business' | 'aliexpress' | 'cj'` — deliberately
+  excluding `'amazon_retail'`, `'generic_rest'`, and `'manual'`, which route through Phase 1's
+  `SupplierClient` or the manual-task flow instead, not this new interface) — this factory is what the
+  catalog-scoring milestone (8) will call to fetch competing offers across suppliers for a given
+  listing.
