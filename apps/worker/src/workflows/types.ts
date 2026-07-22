@@ -1,5 +1,7 @@
 export interface WorkflowOrderPayload {
   orderId: string;
+  /** Skips the margin threshold check — set when a human approves a previously-rejected order. */
+  forceApprove?: boolean;
 }
 
 export interface WorkflowDisputePayload {

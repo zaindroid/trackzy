@@ -10,6 +10,7 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.route('/webhooks/shopify', shopifyWebhook);
 app.route('/webhooks/17track', trackingWebhook);
+app.get('/api/health', (c) => c.json({ ok: true }));
 app.route('/api', apiRoutes);
 
 // Static dashboard (Workers Assets) fallback for everything else.

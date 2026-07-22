@@ -25,6 +25,7 @@ export interface OrderWorkflowParams {
   step: WorkflowStep;
   env: Env;
   orderId: string;
+  forceApprove?: boolean;
 }
 
 /**
@@ -33,10 +34,12 @@ export interface OrderWorkflowParams {
  * object (mocking `.do` / `.waitForEvent`) against a real D1 test database,
  * instead of needing the actual Workflows binding.
  */
-export async function runOrderWorkflow({ step, env, orderId }: OrderWorkflowParams): Promise<void> {
+export async function runOrderWorkflow({ step, env, orderId, forceApprove }: OrderWorkflowParams): Promise<void> {
   const db = createDb(env.DB);
 
-  const evaluation = await step.do('evaluate-margin', async () => evaluateMarginStep(db, env, orderId));
+  const evaluation = await step.do('evaluate-margin', async () =>
+    evaluateMarginStep(db, env, orderId, forceApprove ?? false),
+  );
   if (!evaluation.meetsThreshold) {
     return; // order already marked 'rejected' inside evaluateMarginStep
   }
@@ -82,7 +85,12 @@ export interface EvaluateMarginResult {
   supplierCostCents: number;
 }
 
-export async function evaluateMarginStep(db: Database, env: Env, orderId: string): Promise<EvaluateMarginResult> {
+export async function evaluateMarginStep(
+  db: Database,
+  env: Env,
+  orderId: string,
+  forceApprove = false,
+): Promise<EvaluateMarginResult> {
   const [order] = await db.select().from(orders).where(eq(orders.id, orderId));
   if (!order) throw new Error(`Order ${orderId} not found`);
 
@@ -114,17 +122,18 @@ export async function evaluateMarginStep(db: Database, env: Env, orderId: string
     marginMode: userSettings?.marginMode ?? 'absolute',
     minMarginPercent: userSettings?.minMarginPercent ?? 10,
   });
+  const meetsThreshold = margin.meetsThreshold || forceApprove;
 
   await db
     .update(orders)
     .set({
       marginCents: margin.marginCents,
-      status: margin.meetsThreshold ? 'evaluating' : 'rejected',
+      status: meetsThreshold ? 'evaluating' : 'rejected',
       updatedAt: now(),
     })
     .where(eq(orders.id, orderId));
 
-  return { meetsThreshold: margin.meetsThreshold, supplierId: supplier.id, supplierCostCents };
+  return { meetsThreshold, supplierId: supplier.id, supplierCostCents };
 }
 
 // --- fetch-fulfillment-order --------------------------------------------
