@@ -221,3 +221,45 @@ Autonomous build session. Every non-obvious choice made without a human in the l
   network layer — no new dependency needed, and it keeps the two required frontend tests (Orders table
   renders seed data; Needs-review resolve flow calls PATCH) fast and deterministic while still
   asserting on the exact request body sent to `PATCH /api/fulfillments/:id`.
+
+## Post-milestone-9 — dashboard visual redesign
+User asked for the dashboard to be "elegant, modern, minimalistic," free of emojis (it already was), and
+"super adaptable and easy to use." The original milestone-8 dashboard was functionally complete but
+visually a generic dark-slate-950 + emerald-accent + rounded-pill SaaS template — exactly the kind of
+default that doesn't read as a deliberate choice. Redesigned the full visual system rather than
+patching colors:
+- **Identity grounded in the actual subject** (freight/fulfillment operations, not generic SaaS):
+  typography pairs "Big Shoulders Display" (a condensed industrial grotesque, used sparingly for
+  page titles and the wordmark — evokes stenciled crate/manifest lettering) with "IBM Plex Sans" for
+  body/UI text and "IBM Plex Mono" for anything that's a literal code on a real shipping document —
+  order numbers, tracking numbers, SKUs, dollar amounts, timestamps. This is a non-decorative use of
+  monospace: those values genuinely are printed as fixed-width codes on real labels/manifests.
+- **Signature element**: `StatusStamp` (renamed from `StatusPill`) — a small square marker + uppercase
+  monospace tag with no background fill, styled after a manifest flag entry rather than a generic
+  filled pill. It's the one place the design takes a visible risk; everything around it (forms, panels,
+  nav) stays quiet and mostly square-cornered (`rounded-sm`, 2px) to reinforce a precise, document-like
+  feel without competing for attention.
+- **Palette**: named CSS-variable tokens (`paper`/`paper-raised`/`ink`/`ink-muted`/`ink-faint`/`rule` for
+  the light-default neutral system, plus `signal` — a rust/vermilion brand accent — and four semantic
+  status colors, `freight`/`moss`/`ochre`/`brick`, each with a light and dark value) defined once in
+  `index.css` and wired into `tailwind.config.js` via the `rgb(var(--x) / <alpha-value>)` pattern so
+  Tailwind's opacity modifiers keep working. Light is the primary/default theme (paper, not the default
+  near-black-with-neon-accent AI look); dark is a fully considered second theme, not an afterthought,
+  toggled via `lib/theme.tsx` and persisted, with a blocking inline script in `index.html` so there's no
+  flash of the wrong theme on load.
+- **Genuine responsiveness, not just squeezed breakpoints**: `Layout.tsx` swaps a fixed desktop sidebar
+  for a top bar + slide-over drawer below `lg`, hand-rolled with no new dependency. Every data table uses
+  a `.manifest` CSS class (`index.css` `@layer components`) implementing the standard "real `<table>`
+  markup, CSS-only reflow to labeled stacked rows below `md`" pattern — `data-label` attributes plus a
+  `td::before { content: attr(data-label) }` rule. This was deliberately chosen over reshaping markup per
+  breakpoint: it keeps every `getByRole('table')` / `getByText(...)` query in the existing Orders/
+  Fulfillments tests passing unchanged (pseudo-element `content` isn't part of a DOM node's `textContent`,
+  so it's invisible to Testing Library) while genuinely reflowing on a phone screen.
+- Verified via `pnpm lint && pnpm typecheck && pnpm test && pnpm build` (all green, same 97 tests) plus a
+  manual audit of the compiled CSS output (confirmed `@font-face`/`font-family` rules for all three
+  webfonts, the `content:var(--tw-content)` rules the status-stamp marker and responsive-table labels
+  depend on, and grepped the whole `apps/dashboard/src` tree for leftover `slate-`/`emerald-`/`amber-`/
+  `sky-` classes from the old palette — found and fixed one in the Clerk real-auth fallback screen, the
+  only page not exercised by any test). No headless browser was available in this sandbox to capture an
+  actual screenshot, so this was verified by build success + test success + line-by-line class review
+  rather than a visual diff.
