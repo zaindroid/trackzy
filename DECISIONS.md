@@ -84,3 +84,36 @@ Autonomous build session. Every non-obvious choice made without a human in the l
   an invoice/billing email (must NOT produce a false-positive tracking match), plus one sender-unmatched
   email with no tracking-shaped text (exercises the "nothing worked, needs review" path end-to-end) and one
   exact-Message-ID duplicate of the Acme tracking email (exercises `webhook_events` dedup on re-delivery).
+
+## Milestone 5 — worker ingestion (webhooks + email + queue)
+- Added `wrangler.test.toml`, a copy of `wrangler.toml` without the `[[workflows]]` bindings, used only by
+  `apps/worker/vitest.config.ts`. `@cloudflare/vitest-pool-workers` 0.6.16 wraps the user worker's entry
+  module with its own runner, which does not re-export named classes (`OrderWorkflow`/`DisputeWorkflow`)
+  from that entry file — binding a Workflow to a `class_name` it can't find crashes Miniflare at startup
+  ("has no such named entrypoint"). Spec section 11 already scopes workflow testing to unit-testing step
+  functions with a mocked `step` context rather than full binding-driven execution, so this is a clean split:
+  HTTP-level webhook/email/queue tests run against `wrangler.test.toml`; workflow logic is tested directly
+  in milestone 6 without needing the binding at all. Worker code that calls `env.ORDER_WORKFLOW` /
+  `env.DISPUTE_WORKFLOW` goes through `safeGetWorkflowInstance()` (`apps/worker/src/lib/workflow.ts`), which
+  tolerates the binding being entirely absent, not just "instance not found" — production `wrangler.toml`
+  always has the real bindings, so this only changes behavior under test.
+- `packages/adapters/package.json` gained subpath exports (`./hmac`, `./gemini`, `./shopify`, etc.) and the
+  worker imports from those narrow paths instead of the package barrel. Importing the barrel from
+  `webhooks.shopify.ts` (which only needs `verifyHmacSha256`) pulled `@clerk/backend` into that route's
+  module graph, and one of its transitive deps (`snakecase-keys`) fails to bundle for the Workers runtime
+  in this esbuild/Miniflare version ("Cannot use require() to import an ES Module"). Narrow imports fixed
+  it and are better hygiene regardless — a webhook route has no business bundling the auth SDK.
+- `verifyHmacSha256` now fails closed (`return false`) on an empty secret instead of letting
+  `crypto.subtle.importKey` throw on zero-length key data — an unset/misconfigured secret should read as
+  "reject everything", not crash the request handler with a 500.
+- Email-to-order correlation (spec 6b) does not join on `orders.externalOrderNumber` against the supplier's
+  own order reference (e.g. "AC-10293") — those two identifier spaces are unrelated (Shopify's "#1001" vs.
+  the supplier's own numbering) and the schema has no column to bridge them (fulfillments doesn't carry a
+  supplier-side order id). Instead, a tracking email is matched to the **oldest fulfillment row for that
+  supplier still awaiting a tracking number** (`fulfillments.trackingNumber IS NULL`), a FIFO heuristic
+  that's realistic for a single-tenant demo. A production system would instead persist the supplier's own
+  order id on the fulfillment row when `SupplierClient.createOrder()` returns it and join on that directly —
+  noted here rather than silently deviating from the spec's literal schema.
+- The Shopify webhook route resolves `storefronts.*_ref` pointers (`"env:SHOPIFY_WEBHOOK_SECRET"`) against
+  the Worker's `env` at request time — consistent with the single-tenant dev-fallback convention already
+  documented in `.dev.vars.example` and DECISIONS.md milestone 4.
