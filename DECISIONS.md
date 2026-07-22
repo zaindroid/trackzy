@@ -560,3 +560,39 @@ before each `phase2(N)` commit.
   root `pnpm ci` script, so a milestone commit's "everything must lint, typecheck, and test green" check
   still covers it without conflating two genuinely different deployables (one Cloudflare Worker, one
   browser extension bundle) under one build command.
+
+## Milestone 7 — Tracking Conversion Middleware (Bluecare Express / Aquiline)
+- **The proxy decision (`shouldRouteThroughTrackingProxy`) is its own tiny, explicitly-tested function
+  in `packages/core`**, not inlined into the middleware — spec section 11 explicitly requires "asserting
+  TBA goes to proxy, USPS goes straight through" as a unit test, and the hard rule ("you MUST route it
+  through a tracking proxy API") is exactly the kind of one-line condition that's easy to silently break
+  in a larger orchestration function without a test pinned directly to it. It takes the destination
+  platform as a plain string rather than importing `OrderSource`/`storefronts` types, keeping
+  `packages/core` free of any Cloudflare/DB dependency, consistent with every other module there.
+- **Both named providers implemented** (Bluecare Express and Aquiline), selected via
+  `TRACKING_PROXY_PROVIDER` env var (defaults to Bluecare Express) — spec section 7's milestone title
+  says "implementations" (plural) and names both as acceptable options, so rather than picking one and
+  documenting the other as a TODO, both got a real adapter (same rate-limited-fetch shape as every other
+  Phase 2 real adapter) and a deterministic mock. The two mocks intentionally produce visually distinct
+  formats (`BCE<hex>` vs `AQL<hex>`) so which provider actually ran is obvious from the stored
+  `proxy_tracking` value alone.
+- **The middleware (`apps/worker/src/trackingUploader.ts`) is the single required call path for pushing
+  tracking to a marketplace** — it resolves the fulfillment's destination platform itself (via a
+  `fulfillments → orders → storefronts` join) rather than asking the caller to pass it, specifically so
+  no future call site can accidentally call `OrderSource.pushTracking` directly and skip the proxy
+  check. It always writes a `tracking_events` row (proxied or not) *before* attempting the marketplace
+  push, so the audit trail (and, in the proxied case, the `original_tracking` → `proxy_tracking`
+  mapping) is captured even if the push itself fails or the storefront is in `non_api_mode`.
+- **`NonApiModeError` (thrown by eBay's `pushTracking` when `non_api_mode=1`, from milestone 2) is caught
+  and treated as a valid outcome, not an error** — `pushed: false, proxied: true` is returned rather than
+  propagating the throw, and `fulfillments.pushedToStorefront` deliberately stays `0`. This is the exact
+  handoff point to the Chrome Extension's non-API upload queue built in milestone 6: the proxy
+  conversion still happens (so the extension uploads the *compliant* number, not the raw `TBA...` one),
+  but the actual DOM upload is left to a human via `POST /api/extension/pending-tracking-uploads/:id/complete`.
+  This single test (`trackingUploader.test.ts`'s fourth case) is effectively where milestones 2, 6, and 7
+  first prove they compose correctly end-to-end.
+- **`NonApiModeError` is imported directly from `@fulfillment-tracker/adapters/ebay`** rather than a more
+  generic error type on the `OrderSource` interface itself — currently eBay is the only marketplace with
+  a non-API mode, so a marketplace-agnostic error type would be speculative generalization for a
+  capability nothing else needs yet. Noted here as the one coupling point worth revisiting if a second
+  marketplace ever grows its own non-API fallback.

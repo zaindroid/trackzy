@@ -19,7 +19,8 @@
     "./ebay": "./src/ebay/index.ts",
     "./amazon": "./src/amazon/index.ts",
     "./supplierApi": "./src/supplierApi/index.ts",
-    "./gmail": "./src/gmail/index.ts"
+    "./gmail": "./src/gmail/index.ts",
+    "./trackingProxy": "./src/trackingProxy/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
