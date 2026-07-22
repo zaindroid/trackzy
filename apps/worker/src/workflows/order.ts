@@ -1,15 +1,11 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
 import type { Env } from '../env.js';
 import type { WorkflowOrderPayload } from './types.js';
+import { runOrderWorkflow } from './orderLogic.js';
 
-// TODO(MILESTONE 6): full order lifecycle (margin -> fulfillment order lookup
-// -> place supplier order -> await tracking -> push fulfillment -> await
-// delivery), see spec section 7. Placeholder keeps the Worker deployable and
-// the Queue consumer/webhook routes type-correct while that lands.
+/** Durable order lifecycle orchestration — see spec section 7. Logic lives in orderLogic.ts so it's unit-testable. */
 export class OrderWorkflow extends WorkflowEntrypoint<Env, WorkflowOrderPayload> {
   async run(event: WorkflowEvent<WorkflowOrderPayload>, step: WorkflowStep) {
-    await step.do('noop', async () => {
-      return { orderId: event.payload.orderId };
-    });
+    await runOrderWorkflow({ step, env: this.env, orderId: event.payload.orderId });
   }
 }
