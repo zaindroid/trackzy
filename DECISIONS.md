@@ -160,3 +160,32 @@ Autonomous build session. Every non-obvious choice made without a human in the l
   milestone 5 decision on `wrangler.test.toml`) and "instance id collision" are swallowed, since dispute
   drafting here is best-effort from the order workflow's perspective; `DisputeWorkflow`'s own logic is unit
   tested directly and does not depend on how it was invoked.
+
+## Milestone 7 — API routes + auth
+- `@clerk/backend`'s CJS build calls `require('snakecase-keys')`, and something in that dependency's own
+  chain fails to bundle for the Workers runtime under this esbuild/Miniflare version ("Cannot use require()
+  to import an ES Module") — this time it wasn't a barrel-import hygiene issue (milestone 5's fix): the auth
+  middleware genuinely needs `RealSessionVerifier` reachable from every `/api/*` route, and a *static*
+  `import { verifyToken } from '@clerk/backend'` gets linked and evaluated by the JS module graph regardless
+  of whether `MOCK_MODE` means it's never called. Fixed by making that one import dynamic
+  (`await import('@clerk/backend')` inside `verifySession()`) — dynamic imports are only linked when actually
+  awaited, so in MOCK_MODE (always true under `MockSessionVerifier`) the broken module graph is never
+  touched. Real Clerk auth in production is unaffected; this only changes *when* the module loads.
+- Auth is scoped per-request via `storefronts.userId` → `orders.storefrontId` → `fulfillments.orderId` →
+  `disputes.fulfillmentId` join chains in every list/detail query, rather than trusting client-supplied ids —
+  even though this demo seeds exactly one tenant, the API is written as if it weren't (defends against IDOR
+  by construction rather than by convention).
+- `POST /api/orders/:id/approve` can't resume the original `OrderWorkflow` instance (that run already ended
+  at the margin-rejection `return`, and Workflow instance ids can't be reused) — it starts a **new** instance
+  with a distinct id (`${orderId}:approved:${timestamp}`) and a `forceApprove: true` param that makes
+  `evaluateMarginStep` skip the threshold check while still recording the real computed margin. This is a
+  minimal, additive change (`WorkflowOrderPayload.forceApprove?: boolean`) rather than adding a second
+  workflow entrypoint.
+- `PATCH /api/disputes/:id` collapses `status: 'approved'` straight to `'sent'` in the same request (spec
+  section 8: "approved -> marked sent; real sending is a placeholder adapter") since there's no separate
+  human "now actually send it" step in the API surface — approving *is* sending in this demo. Real delivery
+  is a `TODO(HUMAN)` wiring the `DISPUTE_EMAIL` send_email binding, listed in DEPLOY.md.
+- `/api/health` is deliberately NOT part of the `routes/api/index.ts` sub-app (which applies
+  `authMiddleware` to everything via `app.use('*', ...)` as its first line) — it's registered directly on
+  the top-level Hono app in `index.ts`, before `/api` is mounted, so there's no ambiguity about whether a
+  wildcard auth middleware registered after a sibling route actually covers it.
