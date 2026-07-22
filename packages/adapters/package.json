@@ -16,7 +16,8 @@
     "./clerk": "./src/clerk/index.ts",
     "./rateLimit": "./src/rateLimit.ts",
     "./orderSource": "./src/orderSource/iface.ts",
-    "./ebay": "./src/ebay/index.ts"
+    "./ebay": "./src/ebay/index.ts",
+    "./amazon": "./src/amazon/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

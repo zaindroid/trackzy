@@ -7,7 +7,6 @@ import { MockEbayOrderSource } from './mock.js';
 export * from './iface.js';
 export { RealEbayOrderSource, NonApiModeError } from './real.js';
 export { MockEbayOrderSource } from './mock.js';
-export type { MockCall } from './mock.js';
 
 export function createEbayOrderSource(
   env: EbayEnv,

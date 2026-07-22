@@ -396,3 +396,42 @@ before each `phase2(N)` commit.
   app to verify against** — flagged as a `TODO(HUMAN)` in the adapter code and will be listed in
   DEPLOY.md's eBay section alongside the other Phase 1 adapters that were built the same way (Shopify,
   17TRACK) and never exercised against a live account during the unattended build itself.
+
+## Milestone 3 — Amazon SP-API adapter + RDT integration
+- **RDT is a genuinely separate token from the LWA access token, requested per-order, scoped to exactly
+  one restricted resource path** — `fetchShippingAddress()` first calls
+  `POST /tokens/2021-03-01/restrictedDataToken` (using the normal LWA token) with
+  `restrictedResources: [{ method: 'GET', path: '/orders/v0/orders/{id}/address', dataElements:
+  ['buyerInfo','shippingAddress'] }]`, then uses the returned `restrictedDataToken` — not the LWA
+  token — as the `x-amz-access-token` for the actual address GET. This is specifically unit-tested
+  (`real.test.ts`) by asserting the address-fetch call's access-token header is the RDT and explicitly
+  is *not* the LWA token, since "RDT handling is mandatory for PII" is exactly the kind of requirement
+  that's easy to silently regress (e.g. by accidentally reusing `this.tokens.accessToken` everywhere)
+  without a test that specifically distinguishes the two tokens.
+- **No full AWS SigV4 request signing.** Modern SP-API self-authorized apps (the standard shape for a
+  single-seller integration, as opposed to a published third-party app serving many sellers)
+  authenticate with the LWA access token alone via `x-amz-access-token`; SigV4 is only required for a
+  narrower set of legacy/MWS-compatibility operations that this adapter never calls. Documented inline
+  and in DECISIONS rather than silently omitted, so a future reader doesn't assume it's missing by
+  oversight.
+- **`pushTracking` only submits the Feeds API request; it does not poll for feed-processing completion.**
+  Amazon's fulfillment-confirmation feed is inherently async (submit → Amazon processes on its own
+  schedule → optionally poll `GET /feeds/2021-06-30/feeds/{feedId}` for a terminal status) — polling to
+  completion is multi-second-to-minutes slow-path work that belongs in a Workflow step, not inside a
+  single adapter method call, per the hard rule that slow work never happens in a request path. The
+  adapter's contract ends at "the feed was successfully submitted to Amazon"; a later milestone's
+  Workflow step is responsible for polling/reacting to eventual feed-processing failures if that's
+  needed.
+- **`sendBuyerMessage` maps to the `unexpectedProblem` Messaging API action**, the closest of Amazon's
+  fixed, anti-spam-restricted message templates to a general "here's a text update" use case (Amazon's
+  Messaging API has no free-text/arbitrary-body endpoint) — flagged as a `TODO(HUMAN)` needing real
+  message-content classification (shipping delay vs. order confirmation vs. warranty, etc.) before
+  production use, listed in DEPLOY.md alongside eBay's equivalent messaging caveat from milestone 2.
+- **`listListings`/`updateListing` use the newer Listings Items API** (`/listings/2021-08-01/items/...`,
+  JSON-Patch-style attribute updates for `purchasable_offer`/`fulfillment_availability`) rather than the
+  older asynchronous Reports API (`GET_MERCHANT_LISTINGS_ALL_DATA`), which would require a
+  create-report → poll → download-document flow — the same "no slow polling inside a single adapter
+  call" reasoning as the Feeds API above ruled it out for a synchronous `listListings()` call. Endpoint
+  field shapes are approximate (Amazon's actual JSON structure for `purchasable_offer`/
+  `fulfillment_availability` attributes varies by product type schema); flagged as another
+  `TODO(HUMAN)` verification item.
