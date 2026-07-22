@@ -1,0 +1,25 @@
+import { Hono } from 'hono';
+import type { Env } from './env.js';
+import shopifyWebhook from './routes/webhooks.shopify.js';
+import trackingWebhook from './routes/webhooks.tracking.js';
+import apiRoutes from './routes/api/index.js';
+import { handleEmail } from './email.js';
+import { handleQueue } from './queue.js';
+
+const app = new Hono<{ Bindings: Env }>();
+
+app.route('/webhooks/shopify', shopifyWebhook);
+app.route('/webhooks/17track', trackingWebhook);
+app.route('/api', apiRoutes);
+
+// Static dashboard (Workers Assets) fallback for everything else.
+app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));
+
+export { OrderWorkflow } from './workflows/order.js';
+export { DisputeWorkflow } from './workflows/dispute.js';
+
+export default {
+  fetch: app.fetch,
+  email: handleEmail,
+  queue: handleQueue,
+};

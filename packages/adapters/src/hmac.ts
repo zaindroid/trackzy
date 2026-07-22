@@ -19,6 +19,9 @@ export async function verifyHmacSha256(
   payload: string,
   providedSignatureBase64: string,
 ): Promise<boolean> {
+  // An empty secret is a misconfiguration, never a valid signing key — fail
+  // closed instead of letting Web Crypto throw on zero-length key data.
+  if (!secret) return false;
   const expected = await computeHmacSha256Base64(secret, payload);
   return timingSafeEqual(expected, providedSignatureBase64);
 }

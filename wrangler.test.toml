@@ -1,0 +1,48 @@
+name = "fulfillment-tracker"
+main = "apps/worker/src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Test-only Wrangler config for @cloudflare/vitest-pool-workers. Identical to
+# wrangler.toml except it omits the [[workflows]] bindings: as of
+# vitest-pool-workers 0.6.16, binding a Workflow class exported from the same
+# entry file the test pool wraps fails at Miniflare startup ("has no such
+# named entrypoint" — the pool's runner wrapper module doesn't re-export named
+# classes from the user worker). Spec section 11 already scopes workflow
+# testing to unit-testing step functions with a mocked `step` context rather
+# than full binding-driven execution, so HTTP-level webhook/email/queue tests
+# run against this config, and code that calls env.ORDER_WORKFLOW /
+# env.DISPUTE_WORKFLOW guards against the binding being absent.
+[assets]
+directory = "apps/dashboard/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "fulfillment-tracker-db"
+database_id = "PLACEHOLDER__D1_DATABASE_ID"
+migrations_dir = "packages/db/migrations"
+
+[[queues.producers]]
+queue = "order-events"
+binding = "ORDER_QUEUE"
+
+[[queues.consumers]]
+queue = "order-events"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 3
+dead_letter_queue = "order-events-dlq"
+
+[[queues.producers]]
+queue = "order-events-dlq"
+binding = "ORDER_QUEUE_DLQ"
+
+[vars]
+MOCK_MODE = "true"
+ENVIRONMENT = "test"
+
+[[send_email]]
+name = "DISPUTE_EMAIL"

@@ -1,0 +1,31 @@
+{
+  "name": "@fulfillment-tracker/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "dev": "wrangler dev --config ../../wrangler.toml",
+    "build": "wrangler deploy --dry-run --outdir dist --config ../../wrangler.toml",
+    "migrate:local": "wrangler d1 migrations apply DB --local --config ../../wrangler.toml",
+    "migrate:prod": "wrangler d1 migrations apply DB --remote --config ../../wrangler.toml"
+  },
+  "dependencies": {
+    "@fulfillment-tracker/adapters": "workspace:*",
+    "@fulfillment-tracker/core": "workspace:*",
+    "@fulfillment-tracker/db": "workspace:*",
+    "drizzle-orm": "^0.36.4",
+    "hono": "^4.6.14",
+    "postal-mime": "^2.3.2",
+    "ulid": "^2.3.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.6.4",
+    "@cloudflare/workers-types": "^4.20241205.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.9",
+    "wrangler": "^3.99.0"
+  }
+}
