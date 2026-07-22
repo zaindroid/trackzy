@@ -1,9 +1,8 @@
-export function MetricTile({ label, value, sub }: { label: string; value: string; sub?: string }) {
+export function MetricTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3">
-      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
-      <div className="mt-1 text-2xl font-semibold text-slate-100">{value}</div>
-      {sub && <div className="mt-0.5 text-xs text-slate-500">{sub}</div>}
+    <div className="border-t-2 border-ink pt-2">
+      <div className="text-xs font-medium uppercase tracking-wide text-ink-faint">{label}</div>
+      <div className="mt-1 font-mono text-xl font-medium text-ink sm:text-2xl">{value}</div>
     </div>
   );
 }

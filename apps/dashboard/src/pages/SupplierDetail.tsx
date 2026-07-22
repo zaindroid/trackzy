@@ -4,6 +4,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useAuthToken } from '../lib/auth.js';
 import { apiFetch, type Supplier } from '../lib/api.js';
 import type { TrackingCandidate } from '@fulfillment-tracker/core';
+import { Button, Field, PageHeader, Panel, Textarea, TextInput } from '../components/ui.js';
 
 interface TestParserResult {
   candidate: TrackingCandidate | null;
@@ -31,51 +32,50 @@ export function SupplierDetailPage() {
       }),
   });
 
-  if (!supplier) return <p className="text-slate-500">Loading...</p>;
+  if (!supplier) return <p className="text-sm text-ink-faint">Loading supplier…</p>;
 
   return (
     <div className="max-w-2xl">
-      <h1 className="mb-1 text-xl font-semibold text-slate-100">{supplier.name}</h1>
-      <p className="mb-6 text-sm text-slate-500">
-        {supplier.emailSenderPattern} · parser <code>{supplier.parserId}</code>
-      </p>
+      <PageHeader
+        eyebrow="Supplier"
+        title={supplier.name}
+        description={
+          <span className="font-mono">
+            {supplier.emailSenderPattern} · parser {supplier.parserId}
+          </span>
+        }
+      />
 
-      <section className="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
-        <h2 className="mb-3 text-sm font-semibold text-slate-300">Test parser</h2>
-        <input
-          value={subject}
-          onChange={(e) => setSubject(e.target.value)}
-          placeholder="Subject (optional)"
-          className="mb-2 w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-1.5 text-sm text-slate-200"
-        />
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Paste email body..."
-          rows={6}
-          className="mb-2 w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-1.5 text-sm text-slate-200"
-        />
-        <button
-          onClick={() => testMutation.mutate()}
-          disabled={!text || testMutation.isPending}
-          className="rounded-md bg-emerald-500 px-3 py-1.5 text-sm font-medium text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
-        >
-          Run parser
-        </button>
+      <Panel title="Test parser">
+        <p className="mb-4 text-sm text-ink-muted">
+          Paste a real shipping-notification email below to see exactly what this supplier's parser
+          extracts, live — no need to wait for a real one to arrive.
+        </p>
+        <div className="space-y-3">
+          <Field label="Subject (optional)">
+            <TextInput value={subject} onChange={(e) => setSubject(e.target.value)} />
+          </Field>
+          <Field label="Email body">
+            <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={7} className="font-mono" />
+          </Field>
+          <Button variant="primary" onClick={() => testMutation.mutate()} disabled={!text || testMutation.isPending}>
+            Run parser
+          </Button>
+        </div>
 
         {testMutation.data && (
-          <div className="mt-4 rounded-md border border-slate-800 bg-slate-950 p-3 text-sm">
-            <div className="text-slate-400">Confidence: {testMutation.data.confidence}</div>
+          <div className="mt-4 border border-rule bg-paper p-3 text-sm">
+            <div className="text-ink-muted">Confidence: <span className="font-mono text-ink">{testMutation.data.confidence}</span></div>
             {testMutation.data.candidate ? (
-              <pre className="mt-1 whitespace-pre-wrap text-emerald-400">
+              <pre className="mt-2 whitespace-pre-wrap font-mono text-xs text-moss">
                 {JSON.stringify(testMutation.data.candidate, null, 2)}
               </pre>
             ) : (
-              <div className="mt-1 text-red-400">No tracking candidate extracted.</div>
+              <div className="mt-2 text-brick">No tracking candidate extracted.</div>
             )}
           </div>
         )}
-      </section>
+      </Panel>
     </div>
   );
 }

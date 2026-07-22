@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthToken } from '../lib/auth.js';
 import { apiFetch, type Settings } from '../lib/api.js';
+import { Button, PageHeader, Panel, TextInput } from '../components/ui.js';
 
 export function SettingsPage() {
   const { token } = useAuthToken();
@@ -36,76 +37,81 @@ export function SettingsPage() {
 
   return (
     <div className="max-w-xl">
-      <h1 className="mb-4 text-xl font-semibold text-slate-100">Settings</h1>
+      <PageHeader eyebrow="Configuration" title="Settings" description="Rules the automation follows before it acts on your behalf." />
 
-      <section className="mb-6 rounded-lg border border-slate-800 bg-slate-900/40 p-4">
-        <h2 className="mb-3 text-sm font-semibold text-slate-300">Margin threshold</h2>
-        <div className="mb-3 flex items-center gap-3">
-          <label className="text-sm text-slate-400">
+      <Panel title="Margin threshold" className="mb-6">
+        <p className="mb-4 text-sm text-ink-muted">
+          Orders below this margin are held for review instead of being fulfilled automatically.
+        </p>
+        <div className="mb-4 flex flex-wrap gap-4">
+          <label className="flex items-center gap-2 text-sm text-ink">
             <input
               type="radio"
               checked={marginMode === 'absolute'}
               onChange={() => setMarginMode('absolute')}
-              className="mr-1.5"
+              className="accent-signal"
             />
-            Absolute (cents)
+            Absolute amount
           </label>
-          <label className="text-sm text-slate-400">
+          <label className="flex items-center gap-2 text-sm text-ink">
             <input
               type="radio"
               checked={marginMode === 'percent'}
               onChange={() => setMarginMode('percent')}
-              className="mr-1.5"
+              className="accent-signal"
             />
             Percent of subtotal
           </label>
         </div>
+
         {marginMode === 'absolute' ? (
-          <input
-            type="number"
-            value={minMarginCents}
-            onChange={(e) => setMinMarginCents(Number(e.target.value))}
-            className="w-40 rounded-md border border-slate-800 bg-slate-900 px-3 py-1.5 text-sm text-slate-200"
-          />
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-ink-muted">$</span>
+            <TextInput
+              type="number"
+              value={(minMarginCents / 100).toFixed(2)}
+              onChange={(e) => setMinMarginCents(Math.round(Number(e.target.value) * 100))}
+              className="w-32 font-mono"
+            />
+          </div>
         ) : (
-          <input
-            type="number"
-            value={minMarginPercent}
-            onChange={(e) => setMinMarginPercent(Number(e.target.value))}
-            className="w-40 rounded-md border border-slate-800 bg-slate-900 px-3 py-1.5 text-sm text-slate-200"
-          />
+          <div className="flex items-center gap-2">
+            <TextInput
+              type="number"
+              value={minMarginPercent}
+              onChange={(e) => setMinMarginPercent(Number(e.target.value))}
+              className="w-24 font-mono"
+            />
+            <span className="text-sm text-ink-muted">%</span>
+          </div>
         )}
 
-        <div className="mt-4 flex items-center gap-2">
+        <label className="mt-5 flex items-center gap-2 text-sm text-ink">
           <input
             type="checkbox"
-            id="auto-fulfill"
             checked={autoFulfill}
             onChange={(e) => setAutoFulfill(e.target.checked)}
+            className="accent-signal"
           />
-          <label htmlFor="auto-fulfill" className="text-sm text-slate-400">
-            Auto-fulfill orders that clear the margin threshold
-          </label>
+          Auto-fulfill orders that clear the margin threshold
+        </label>
+
+        <div className="mt-5 flex items-center gap-3">
+          <Button variant="primary" onClick={() => saveMutation.mutate()}>
+            Save settings
+          </Button>
+          {saveMutation.isSuccess && <span className="text-sm text-moss">Saved.</span>}
         </div>
+      </Panel>
 
-        <button
-          onClick={() => saveMutation.mutate()}
-          className="mt-4 rounded-md bg-emerald-500 px-3 py-1.5 text-sm font-medium text-slate-950 hover:bg-emerald-400"
-        >
-          Save settings
-        </button>
-        {saveMutation.isSuccess && <span className="ml-3 text-sm text-emerald-400">Saved.</span>}
-      </section>
-
-      <section className="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
-        <h2 className="mb-2 text-sm font-semibold text-slate-300">Storefront &amp; API keys</h2>
-        <p className="text-sm text-slate-500">
+      <Panel title="Storefront & API keys">
+        <p className="text-sm text-ink-muted">
           Storefront access tokens, webhook secrets, and supplier API keys are managed as Cloudflare
-          Worker secrets, not through this UI — see <code>DEPLOY.md</code> for the exact{' '}
-          <code>wrangler secret put</code> commands. This keeps real credentials out of the database and
-          out of the browser entirely.
+          Worker secrets, not through this screen — see <code className="font-mono">DEPLOY.md</code>{' '}
+          for the exact <code className="font-mono">wrangler secret put</code> commands. Real
+          credentials never pass through the database or the browser.
         </p>
-      </section>
+      </Panel>
     </div>
   );
 }

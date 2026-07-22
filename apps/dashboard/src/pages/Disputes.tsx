@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthToken } from '../lib/auth.js';
 import { apiFetch, type Dispute } from '../lib/api.js';
-import { StatusPill } from '../components/StatusPill.js';
+import { StatusStamp } from '../components/StatusStamp.js';
+import { Button, EmptyState, Field, PageHeader, Panel, Textarea, TextInput } from '../components/ui.js';
 
 function DisputeCard({ dispute }: { dispute: Dispute }) {
   const { token } = useAuthToken();
@@ -22,47 +23,33 @@ function DisputeCard({ dispute }: { dispute: Dispute }) {
   const editable = dispute.status === 'draft';
 
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs text-slate-500">{dispute.reason}</span>
-        <StatusPill status={dispute.status} />
+    <Panel>
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <span className="text-sm text-ink-muted">{dispute.reason}</span>
+        <StatusStamp status={dispute.status} />
       </div>
-      <input
-        value={subject}
-        onChange={(e) => setSubject(e.target.value)}
-        disabled={!editable}
-        className="mb-2 w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-1.5 text-sm text-slate-200 disabled:opacity-60"
-      />
-      <textarea
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-        disabled={!editable}
-        rows={5}
-        className="mb-3 w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-1.5 text-sm text-slate-200 disabled:opacity-60"
-      />
+      <div className="space-y-3">
+        <Field label="Subject">
+          <TextInput value={subject} onChange={(e) => setSubject(e.target.value)} disabled={!editable} />
+        </Field>
+        <Field label="Message">
+          <Textarea value={body} onChange={(e) => setBody(e.target.value)} disabled={!editable} rows={5} />
+        </Field>
+      </div>
       {editable && (
-        <div className="flex gap-2">
-          <button
-            onClick={() => patchMutation.mutate('approved')}
-            className="rounded-md bg-emerald-500 px-3 py-1.5 text-sm font-medium text-slate-950 hover:bg-emerald-400"
-          >
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button variant="primary" onClick={() => patchMutation.mutate('approved')}>
             Approve &amp; send
-          </button>
-          <button
-            onClick={() => patchMutation.mutate('rejected')}
-            className="rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
-          >
+          </Button>
+          <Button variant="danger" onClick={() => patchMutation.mutate('rejected')}>
             Reject
-          </button>
-          <button
-            onClick={() => patchMutation.mutate(undefined)}
-            className="rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
-          >
+          </Button>
+          <Button variant="ghost" onClick={() => patchMutation.mutate(undefined)}>
             Save edits
-          </button>
+          </Button>
         </div>
       )}
-    </div>
+    </Panel>
   );
 }
 
@@ -75,12 +62,12 @@ export function DisputesPage() {
 
   return (
     <div className="max-w-2xl">
-      <h1 className="mb-4 text-xl font-semibold text-slate-100">Disputes</h1>
+      <PageHeader eyebrow="Exceptions" title="Disputes" description="Carrier claims drafted for missing or delayed shipments." />
       <div className="space-y-4">
         {query.data?.disputes.map((d) => (
           <DisputeCard key={d.id} dispute={d} />
         ))}
-        {query.data?.disputes.length === 0 && <p className="text-slate-500">No disputes.</p>}
+        {query.data?.disputes.length === 0 && <EmptyState>No open disputes.</EmptyState>}
       </div>
     </div>
   );

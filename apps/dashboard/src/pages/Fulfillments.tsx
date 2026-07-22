@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthToken } from '../lib/auth.js';
 import { apiFetch, type Fulfillment } from '../lib/api.js';
-import { StatusPill } from '../components/StatusPill.js';
+import { StatusStamp } from '../components/StatusStamp.js';
+import { Button, EmptyState, PageHeader, Select, TextInput } from '../components/ui.js';
 
 function ResolveRow({ fulfillment }: { fulfillment: Fulfillment }) {
   const { token } = useAuthToken();
@@ -20,37 +21,35 @@ function ResolveRow({ fulfillment }: { fulfillment: Fulfillment }) {
   });
 
   return (
-    <tr>
-      <td className="px-4 py-2.5 text-slate-300">{fulfillment.id.slice(0, 8)}</td>
-      <td className="px-4 py-2.5">
-        <input
+    <tr className="bg-ochre/5">
+      <td data-label="Fulfillment" className="font-mono text-ink-muted md:px-4 md:py-2.5">
+        {fulfillment.id.slice(0, 8)}
+      </td>
+      <td data-label="Tracking" className="md:px-4 md:py-2.5">
+        <TextInput
           value={trackingNumber}
           onChange={(e) => setTrackingNumber(e.target.value)}
-          className="w-48 rounded-md border border-slate-800 bg-slate-900 px-2 py-1 text-sm text-slate-200"
+          className="w-44 font-mono sm:w-52"
         />
       </td>
-      <td className="px-4 py-2.5">
-        <select
-          value={carrierFinal}
-          onChange={(e) => setCarrierFinal(e.target.value)}
-          className="rounded-md border border-slate-800 bg-slate-900 px-2 py-1 text-sm text-slate-200"
-        >
+      <td data-label="Carrier" className="md:px-4 md:py-2.5">
+        <Select value={carrierFinal} onChange={(e) => setCarrierFinal(e.target.value)} className="w-36">
           <option value="">Pick carrier</option>
           <option value="UPS">UPS</option>
           <option value="USPS">USPS</option>
           <option value="FEDEX">FedEx</option>
           <option value="DHL">DHL</option>
-        </select>
+        </Select>
       </td>
-      <td className="px-4 py-2.5">
-        <button
-          onClick={() => resolveMutation.mutate()}
-          disabled={resolveMutation.isPending}
-          className="rounded-md bg-emerald-500 px-3 py-1 text-sm font-medium text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
-        >
-          Resolve
-        </button>
-        {resolveMutation.isError && <span className="ml-2 text-xs text-red-400">{(resolveMutation.error as Error).message}</span>}
+      <td data-label="Status" className="md:px-4 md:py-2.5">
+        <div className="flex items-center justify-end gap-2 md:justify-start">
+          <Button variant="primary" onClick={() => resolveMutation.mutate()} disabled={resolveMutation.isPending}>
+            Resolve
+          </Button>
+          {resolveMutation.isError && (
+            <span className="text-xs text-brick">{(resolveMutation.error as Error).message}</span>
+          )}
+        </div>
       </td>
     </tr>
   );
@@ -62,62 +61,67 @@ export function FulfillmentsPage() {
 
   const query = useQuery({
     queryKey: ['fulfillments', tab],
-    queryFn: () => apiFetch<{ fulfillments: Fulfillment[] }>(`/fulfillments${tab === 'needsReview' ? '?needsReview=true' : ''}`, token),
+    queryFn: () =>
+      apiFetch<{ fulfillments: Fulfillment[] }>(`/fulfillments${tab === 'needsReview' ? '?needsReview=true' : ''}`, token),
   });
 
   return (
     <div>
-      <h1 className="mb-4 text-xl font-semibold text-slate-100">Fulfillments</h1>
+      <PageHeader eyebrow="Manifest" title="Fulfillments" description="Tracking numbers, carriers, and shipment status." />
 
-      <div className="mb-4 flex gap-2">
+      <div className="mb-4 flex gap-5 border-b border-rule text-sm">
         <button
           onClick={() => setTab('all')}
-          className={`rounded-md px-3 py-1.5 text-sm ${tab === 'all' ? 'bg-emerald-500/15 text-emerald-400' : 'text-slate-400 hover:bg-slate-800'}`}
+          className={`-mb-px border-b-2 px-1 py-2 font-medium transition-colors ${
+            tab === 'all' ? 'border-signal text-ink' : 'border-transparent text-ink-muted hover:text-ink'
+          }`}
         >
           All
         </button>
         <button
           onClick={() => setTab('needsReview')}
-          className={`rounded-md px-3 py-1.5 text-sm ${tab === 'needsReview' ? 'bg-amber-500/15 text-amber-400' : 'text-slate-400 hover:bg-slate-800'}`}
+          className={`-mb-px border-b-2 px-1 py-2 font-medium transition-colors ${
+            tab === 'needsReview' ? 'border-ochre text-ink' : 'border-transparent text-ink-muted hover:text-ink'
+          }`}
         >
           Needs review
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-slate-800">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-slate-900/60 text-xs uppercase tracking-wide text-slate-500">
+      <div className="border border-rule bg-paper-raised shadow-raised">
+        <table className="manifest">
+          <thead className="border-b border-rule text-xs uppercase tracking-wide text-ink-faint">
             <tr>
-              <th className="px-4 py-2.5">Fulfillment</th>
-              <th className="px-4 py-2.5">Tracking</th>
-              <th className="px-4 py-2.5">Carrier</th>
-              <th className="px-4 py-2.5">Status</th>
+              <th className="px-4 py-2.5 font-medium">Fulfillment</th>
+              <th className="px-4 py-2.5 font-medium">Tracking</th>
+              <th className="px-4 py-2.5 font-medium">Carrier</th>
+              <th className="px-4 py-2.5 font-medium">Status</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800">
+          <tbody>
             {query.data?.fulfillments.map((f) =>
               f.trackingStatus === 'needs_review' ? (
                 <ResolveRow key={f.id} fulfillment={f} />
               ) : (
-                <tr key={f.id} className="hover:bg-slate-900/40">
-                  <td className="px-4 py-2.5 text-slate-300">{f.id.slice(0, 8)}</td>
-                  <td className="px-4 py-2.5 text-slate-300">{f.trackingNumber ?? '—'}</td>
-                  <td className="px-4 py-2.5 text-slate-300">{f.carrierFinal ?? '—'}</td>
-                  <td className="px-4 py-2.5">
-                    <StatusPill status={f.trackingStatus} />
+                <tr key={f.id} className="md:hover:bg-paper">
+                  <td data-label="Fulfillment" className="font-mono text-ink-muted md:px-4 md:py-2.5">
+                    {f.id.slice(0, 8)}
+                  </td>
+                  <td data-label="Tracking" className="font-mono text-ink md:px-4 md:py-2.5">
+                    {f.trackingNumber ?? '—'}
+                  </td>
+                  <td data-label="Carrier" className="text-ink-muted md:px-4 md:py-2.5">
+                    {f.carrierFinal ?? '—'}
+                  </td>
+                  <td data-label="Status" className="md:px-4 md:py-2.5">
+                    <StatusStamp status={f.trackingStatus} />
                   </td>
                 </tr>
               ),
             )}
-            {query.data?.fulfillments.length === 0 && (
-              <tr>
-                <td colSpan={4} className="px-4 py-8 text-center text-slate-500">
-                  Nothing here.
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
+        {query.data?.fulfillments.length === 0 && <EmptyState>Nothing here.</EmptyState>}
       </div>
     </div>
   );

@@ -23,7 +23,7 @@ function ClerkBridge({ children }: { children: ReactNode }) {
   if (!isLoaded) return null;
   if (!isSignedIn) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-950">
+      <div className="flex min-h-screen items-center justify-center bg-paper">
         <SignIn />
       </div>
     );

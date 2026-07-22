@@ -3,8 +3,9 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { useAuthToken } from '../lib/auth.js';
 import { apiFetch, type Metrics, type Order } from '../lib/api.js';
-import { StatusPill } from '../components/StatusPill.js';
+import { StatusStamp } from '../components/StatusStamp.js';
 import { MetricTile, formatCents } from '../components/MetricTile.js';
+import { EmptyState, PageHeader, Select, TextInput } from '../components/ui.js';
 
 const STATUS_FILTERS = [
   'all',
@@ -42,10 +43,10 @@ export function OrdersPage() {
 
   return (
     <div>
-      <h1 className="mb-4 text-xl font-semibold text-slate-100">Orders</h1>
+      <PageHeader eyebrow="Manifest" title="Orders" description="Every order flowing through fulfillment today." />
 
       {metricsQuery.data && (
-        <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <div className="mb-8 grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-5">
           <MetricTile label="Orders today" value={String(metricsQuery.data.ordersToday)} />
           <MetricTile label="Avg margin" value={formatCents(metricsQuery.data.avgMarginCents)} />
           <MetricTile label="Regex-extracted" value={`${metricsQuery.data.autoExtractedRegexPercent}%`} />
@@ -54,64 +55,61 @@ export function OrdersPage() {
         </div>
       )}
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-          className="rounded-md border border-slate-800 bg-slate-900 px-3 py-1.5 text-sm text-slate-200"
-        >
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <Select value={status} onChange={(e) => setStatus(e.target.value)} className="sm:w-52">
           {STATUS_FILTERS.map((s) => (
             <option key={s} value={s}>
               {s === 'all' ? 'All statuses' : s.replace(/_/g, ' ')}
             </option>
           ))}
-        </select>
-        <input
+        </Select>
+        <TextInput
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search order #..."
-          className="rounded-md border border-slate-800 bg-slate-900 px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-600"
+          placeholder="Search order number"
+          className="sm:w-56"
         />
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-slate-800">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-slate-900/60 text-xs uppercase tracking-wide text-slate-500">
+      <div className="border border-rule bg-paper-raised shadow-raised">
+        <table className="manifest">
+          <thead className="border-b border-rule text-xs uppercase tracking-wide text-ink-faint">
             <tr>
-              <th className="px-4 py-2.5">Order</th>
-              <th className="px-4 py-2.5">Status</th>
-              <th className="px-4 py-2.5">Subtotal</th>
-              <th className="px-4 py-2.5">Margin</th>
-              <th className="px-4 py-2.5">Created</th>
+              <th className="px-4 py-2.5 font-medium">Order</th>
+              <th className="px-4 py-2.5 font-medium">Status</th>
+              <th className="px-4 py-2.5 font-medium">Subtotal</th>
+              <th className="px-4 py-2.5 font-medium">Margin</th>
+              <th className="px-4 py-2.5 font-medium">Created</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800">
+          <tbody>
             {ordersQuery.data?.orders.map((order) => (
-              <tr key={order.id} className="hover:bg-slate-900/40">
-                <td className="px-4 py-2.5">
-                  <Link to={`/orders/${order.id}`} className="font-medium text-emerald-400 hover:underline">
+              <tr key={order.id} className="md:hover:bg-paper">
+                <td data-label="Order" className="md:px-4 md:py-2.5">
+                  <Link to={`/orders/${order.id}`} className="font-mono font-medium text-signal hover:underline">
                     {order.externalOrderNumber}
                   </Link>
                 </td>
-                <td className="px-4 py-2.5">
-                  <StatusPill status={order.status} />
+                <td data-label="Status" className="md:px-4 md:py-2.5">
+                  <StatusStamp status={order.status} />
                 </td>
-                <td className="px-4 py-2.5 text-slate-300">{formatCents(order.subtotalCents)}</td>
-                <td className={`px-4 py-2.5 ${order.marginCents !== null && order.marginCents < 0 ? 'text-red-400' : 'text-slate-300'}`}>
+                <td data-label="Subtotal" className="font-mono text-ink-muted md:px-4 md:py-2.5">
+                  {formatCents(order.subtotalCents)}
+                </td>
+                <td
+                  data-label="Margin"
+                  className={`font-mono md:px-4 md:py-2.5 ${order.marginCents !== null && order.marginCents < 0 ? 'text-brick' : 'text-ink-muted'}`}
+                >
                   {order.marginCents !== null ? formatCents(order.marginCents) : '—'}
                 </td>
-                <td className="px-4 py-2.5 text-slate-500">{new Date(order.createdAt).toLocaleString()}</td>
-              </tr>
-            ))}
-            {ordersQuery.data?.orders.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
-                  No orders match this filter.
+                <td data-label="Created" className="text-ink-faint md:px-4 md:py-2.5">
+                  {new Date(order.createdAt).toLocaleString()}
                 </td>
               </tr>
-            )}
+            ))}
           </tbody>
         </table>
+        {ordersQuery.data?.orders.length === 0 && <EmptyState>No orders match this filter.</EmptyState>}
       </div>
     </div>
   );
