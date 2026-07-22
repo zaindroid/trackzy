@@ -15,7 +15,7 @@ SHOPIFY_API_VERSION=2024-10
 
 # --- Google Gemini Flash (email-extraction fallback + dispute drafting ONLY) ---
 GEMINI_API_KEY=PLACEHOLDER__GEMINI_API_KEY
-GEMINI_MODEL=gemini-1.5-flash
+GEMINI_MODEL=gemini-flash-latest
 
 # --- 17TRACK carrier tracking events ---
 SEVENTEENTRACK_API_KEY=PLACEHOLDER__SEVENTEENTRACK_API_KEY
