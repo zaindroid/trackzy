@@ -510,3 +510,53 @@ before each `phase2(N)` commit.
   `vitest-pool-workers`' `SELF.scheduled()` helper and keeps the test asserting on behavior
   (fulfillment resolved, webhook_events deduped, cursor advanced) rather than on Workers runtime
   plumbing.
+
+## Milestone 6 — Manual Task flow + Manifest V3 Chrome Extension scaffold
+- **Buy Queue lifecycle lives at `/api/manual-tasks` (list/claim/mark-ordered/abandon), the two
+  extension-specific reads/writes at `/api/extension/*`** (`active-manual-task`,
+  `pending-tracking-uploads` + `.../complete`) — kept in separate route files because they serve two
+  different audiences (the dashboard's Buy Queue page lists/manages tasks broadly; the extension polls
+  narrowly for "what should I show right now on this page"), but both mount under the same
+  Clerk-authed `/api/*` sub-app and reuse the same bearer-token convention — the extension's popup
+  stores the same kind of token the dashboard does (`dev-user` in MOCK_MODE), so no separate auth
+  scheme was needed for the extension.
+- **`GET /api/extension/active-manual-task` returns the single oldest `claimed` task, with no
+  domain-matching** — the schema (spec section 4, followed literally in milestone 1) gives suppliers no
+  "checkout domain" column to match a content script's current page against, so a more precise
+  "which task belongs on *this* checkout page" lookup isn't buildable from the given schema. Documented
+  as a real limitation of a single-tenant scaffold rather than silently adding an unlisted column.
+- **`GET /api/extension/pending-tracking-uploads` still reuses the plain `fulfillments`-column read
+  designed in milestone 2's DECISIONS.md** (`non_api_mode` storefront + `pushed_to_storefront=0` +
+  `tracking_number IS NOT NULL`) rather than a dedicated queue table — this milestone is where that
+  design actually gets exercised end-to-end for the first time, confirming the earlier call didn't need
+  revisiting once the real consumer (the extension) existed.
+- **Chrome MV3 content scripts cannot `import` a shared chunk** — Chrome loads everything listed under
+  `manifest.json`'s `content_scripts` as a classic (non-module) script, so a naive multi-entry Vite/ES-module
+  build that code-splits a shared `lib/api.ts` into `chunks/api.js` silently produces a broken extension
+  (the content script's own `import` statement is a syntax error in a classic-script context — this
+  would only surface as a real bug once loaded in an actual browser, so it was caught here specifically
+  by inspecting the build output for top-level `import`/`export` statements). Fixed with four separate
+  single-entry `vite build` invocations (`vite.config.ts` for the popup's normal HTML/ES-module entry;
+  `vite.background.config.ts`, `vite.content-checkout.config.ts`, `vite.content-ebay-tracking.config.ts`
+  each building one IIFE-format entry with `emptyOutDir: false` so they don't clobber each other's
+  output) rather than adding `@crxjs/vite-plugin` or a similar dependency — plain Vite/Rollup config
+  already solves this once each content script and the background worker are built as their own
+  self-contained bundle; `lib/api.ts`'s code ends up duplicated across `content-checkout.js` and
+  `content-ebay-tracking.js`, an acceptable tradeoff given both files are a few KB and content scripts
+  run in isolated execution contexts anyway (no shared-module benefit to lose).
+- **`addressMapping.ts`'s pure mapping logic (shipTo fields → `{selector, value}` pairs) is deliberately
+  separated from the actual DOM injection in `content/checkout.ts`** specifically so it's the one part
+  of the checkout-paste flow that's genuinely unit-testable without a real browser or a live Amazon
+  checkout page — the selector *values* themselves (`DEFAULT_AMAZON_CHECKOUT_SELECTORS`) are a
+  best-effort guess flagged `TODO(HUMAN)`, matching the same "can't verify against a live account, so
+  document the gap and test what's actually testable" approach used throughout Phase 2 for eBay/Amazon/
+  AliExpress/CJ's exact endpoint shapes.
+- **`@types/chrome` added as a new dependency** (`apps/extension`) — justified: it's the standard,
+  necessary type-definition package for any TypeScript Chrome extension (`chrome.storage`,
+  `chrome.alarms`, `chrome.runtime` all need it to typecheck), with no reasonable substitute.
+- **`apps/extension` is excluded from the root `pnpm build` script** (which Phase 1 defined as
+  specifically "produces the deployable worker") but included in `pnpm typecheck`/`pnpm test` via the
+  existing `pnpm -r` recursion, and gets its own `pnpm build:extension` — both are now chained into the
+  root `pnpm ci` script, so a milestone commit's "everything must lint, typecheck, and test green" check
+  still covers it without conflating two genuinely different deployables (one Cloudflare Worker, one
+  browser extension bundle) under one build command.

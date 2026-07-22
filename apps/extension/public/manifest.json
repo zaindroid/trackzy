@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Fulfillment Tracker — The Edge Agent",
+  "version": "0.1.0",
+  "description": "1-click checkout address pasting and non-API tracking upload for manual-supplier and non-API-marketplace fulfillment.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Fulfillment Tracker"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["storage", "activeTab", "scripting", "alarms"],
+  "host_permissions": [
+    "https://fulfillment-tracker.zainey4-26a.workers.dev/*",
+    "https://www.amazon.com/*",
+    "https://www.ebay.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://www.amazon.com/*"],
+      "js": ["content-checkout.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.ebay.com/*"],
+      "js": ["content-ebay-tracking.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
+
