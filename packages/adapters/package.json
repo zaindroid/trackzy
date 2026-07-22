@@ -13,7 +13,10 @@
     "./gemini": "./src/gemini/index.ts",
     "./seventeentrack": "./src/seventeentrack/index.ts",
     "./suppliers": "./src/suppliers/index.ts",
-    "./clerk": "./src/clerk/index.ts"
+    "./clerk": "./src/clerk/index.ts",
+    "./rateLimit": "./src/rateLimit.ts",
+    "./orderSource": "./src/orderSource/iface.ts",
+    "./ebay": "./src/ebay/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

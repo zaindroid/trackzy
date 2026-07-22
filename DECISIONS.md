@@ -362,3 +362,37 @@ before each `phase2(N)` commit.
   `supplier_offers` pair with two competing offers already scored, so every Phase 2 dashboard page
   planned in later milestones (Buy Queue, Catalog/Listings, Tracking, Messages) has non-empty seed data
   from milestone 1 onward, matching the same "every page non-empty" convention Phase 1's seed followed.
+
+## Milestone 2 — OrderSource interface refactor + eBay adapter
+- **Shopify does not implement `OrderSource`.** The interface (`listNewOrders`, `getOrder`,
+  `pushTracking`, `sendBuyerMessage`, `listListings`, `updateListing`, `pauseListing`) is shaped for
+  polling-based marketplaces, and Shopify already has a strictly better mechanism — real-time webhook
+  push, HMAC-verified and deduplicated, live in production since Phase 1. Wrapping it into a generic
+  polling interface would mean either (a) faking a `listNewOrders(since)` that just re-polls Shopify
+  needlessly when a push channel already exists, or (b) leaving it unimplemented/throwing, which
+  provides no value. "Extend, do not rewrite" is read literally here: `OrderSource` is a new interface
+  for the new marketplaces; Shopify's Phase 1 code path is untouched.
+- **`pushTracking`'s non-API-mode behavior is a thrown `NonApiModeError`, not a silent branch.** When
+  `nonApiMode` is true, `RealEbayOrderSource.pushTracking` (and the mock, identically) throws a typed
+  error carrying the order id + tracking payload, rather than trying to perform the DOM-upload dispatch
+  itself. The adapter's job is talking to eBay's API; deciding what to do when that's *not* the right
+  channel is a caller-level (workflow) concern — this mirrors the existing convention that adapters
+  never touch D1 or make routing decisions on their own.
+- **No new table for the Chrome-extension tracking-upload queue.** The spec's own field list for new
+  tables (section 4) doesn't include one, and the natural candidate for reuse — `manual_tasks` — doesn't
+  fit (its `supplier_id` is `NOT NULL`, but a tracking-upload task has no associated supplier purchase,
+  only an existing fulfillment). Instead, the extension's "what needs uploading" queue is just a read
+  over already-existing columns: `fulfillments` rows with `pushed_to_storefront = 0`,
+  `tracking_number IS NOT NULL`, whose owning `storefronts.non_api_mode = 1`. This needs zero schema
+  changes and will be exposed as a dedicated API route in the Chrome-extension milestone.
+- **Rate limiting (hard rule) implemented once, shared by every real marketplace/supplier adapter**:
+  `packages/adapters/src/rateLimit.ts` exports a pure, clock-injectable `TokenBucket` plus
+  `fetchWithBackoff` (jittered exponential backoff on 429/5xx, passes through everything else
+  immediately). It has no dependency on eBay specifically — Amazon/AliExpress/CJ real adapters
+  (milestones 3-4) reuse it as-is rather than each inventing their own limiter.
+- **eBay's real adapter's exact endpoint shapes (buyer messaging via Post-Order API `casemanagement`,
+  Inventory API price/quantity split between `offer` and `inventory_item` resources) are written to
+  match eBay's publicly documented REST API structure as closely as possible without a live sandbox
+  app to verify against** — flagged as a `TODO(HUMAN)` in the adapter code and will be listed in
+  DEPLOY.md's eBay section alongside the other Phase 1 adapters that were built the same way (Shopify,
+  17TRACK) and never exercised against a live account during the unattended build itself.
