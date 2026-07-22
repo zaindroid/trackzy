@@ -6,6 +6,7 @@ import { NonApiModeError } from '@fulfillment-tracker/adapters/ebay';
 import type { OrderSource } from '@fulfillment-tracker/adapters/orderSource';
 import type { Env } from './env.js';
 import { newId, now } from './lib/id.js';
+import { sendBuyerMessage } from './messaging.js';
 
 export interface PushTrackingResult {
   pushed: boolean;
@@ -29,6 +30,7 @@ export async function pushTrackingWithProxy(
   const db = createDb(env.DB);
   const [row] = await db
     .select({
+      orderId: fulfillments.orderId,
       trackingNumber: fulfillments.trackingNumber,
       carrierFinal: fulfillments.carrierFinal,
       externalOrderId: orders.externalOrderId,
@@ -65,6 +67,7 @@ export async function pushTrackingWithProxy(
       lineItemIds,
     });
     await db.update(fulfillments).set({ pushedToStorefront: 1, updatedAt: now() }).where(eq(fulfillments.id, fulfillmentId));
+    await sendBuyerMessage(env, row.orderId, 'shipped').catch(() => undefined); // best-effort — never fail the push over a messaging hiccup
     return { pushed: true, proxied };
   } catch (err) {
     if (err instanceof NonApiModeError) {

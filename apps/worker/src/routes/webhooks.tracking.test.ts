@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { env, SELF } from 'cloudflare:test';
 import { computeHmacSha256Base64 } from '@fulfillment-tracker/adapters/hmac';
-import { createDb, fulfillments, orders, storefronts, suppliers, users, webhookEvents } from '@fulfillment-tracker/db';
+import { createDb, fulfillments, messages, orders, storefronts, suppliers, trackingEvents, users, webhookEvents } from '@fulfillment-tracker/db';
 import { eq } from 'drizzle-orm';
 
 // Must match the SEVENTEENTRACK_API_KEY binding configured in vitest.config.ts.
@@ -100,5 +100,67 @@ describe('POST /webhooks/17track', () => {
     const db = createDb(env.DB);
     const events = await db.select().from(webhookEvents).where(eq(webhookEvents.source, '17track'));
     expect(events).toHaveLength(1);
+  });
+
+  it('records a tracking_events row for a deterministically-mapped status', async () => {
+    await post(payload('1Z999AA10123456780', 'InTransit'));
+
+    const db = createDb(env.DB);
+    const [event] = await db.select().from(trackingEvents).where(eq(trackingEvents.fulfillmentId, 'ff_t'));
+    expect(event?.status).toBe('in_transit');
+    expect(event?.rawStatus).toBe('InTransit');
+    expect(event?.originalTracking).toBe('1Z999AA10123456780');
+  });
+
+  it('falls back to Gemini classification for an unmapped status and still records tracking_events', async () => {
+    await post(payload('1Z999AA10123456780', 'Package appears lost in transit'));
+
+    const db = createDb(env.DB);
+    const [event] = await db.select().from(trackingEvents).where(eq(trackingEvents.fulfillmentId, 'ff_t'));
+    expect(event?.status).toBe('exception'); // mock Gemini recognizes the "lost" keyword
+    expect(event?.rawStatus).toBe('Package appears lost in transit');
+  });
+
+  it('sends a delivered buyer message and schedules a feedback reminder on delivery', async () => {
+    await post(payload('1Z999AA10123456780', 'Delivered'));
+
+    const db = createDb(env.DB);
+    const rows = await db.select().from(messages).where(eq(messages.orderId, 'ord_t'));
+    const triggers = rows.map((m) => m.trigger).sort();
+    expect(triggers).toEqual(['delivered', 'feedback_reminder']);
+
+    const delivered = rows.find((m) => m.trigger === 'delivered');
+    expect(delivered?.status).toBe('skipped'); // storefront platform is shopify — no OrderSource, so sendBuyerMessage skips
+    const reminder = rows.find((m) => m.trigger === 'feedback_reminder');
+    expect(reminder?.status).toBe('pending'); // scheduled, not sent immediately
+  });
+
+  it('sends a stalled message for a stuck/lost exception and completes without error', async () => {
+    // The actual `disputes` row is written by DisputeWorkflow.run() itself
+    // (Phase 1, packages/adapters/src/gemini + disputeLogic.ts), not by this
+    // route — draftDispute() here only best-effort starts that Workflow
+    // instance. The DISPUTE_WORKFLOW binding is unavailable in this test
+    // environment (see wrangler.test.toml), so draftDispute() is a documented
+    // no-op here; DisputeWorkflow's own row-writing behavior is covered
+    // directly by workflows/disputeLogic.test.ts. What's observable — and
+    // what this test actually asserts — is that the stuck/lost path still
+    // sends the 'stalled' buyer message and the request completes cleanly.
+    const res = await post(payload('1Z999AA10123456780', 'Package appears lost in transit'));
+    expect(res.status).toBe(200);
+
+    const db = createDb(env.DB);
+    const rows = await db.select().from(messages).where(eq(messages.orderId, 'ord_t'));
+    expect(rows.some((m) => m.trigger === 'stalled')).toBe(true);
+  });
+
+  it('does not send a stalled message for a needs_review (genuinely unclassifiable) status', async () => {
+    await post(payload('1Z999AA10123456780', 'Status code 47B'));
+
+    const db = createDb(env.DB);
+    const [event] = await db.select().from(trackingEvents).where(eq(trackingEvents.fulfillmentId, 'ff_t'));
+    expect(event?.status).toBe('needs_review');
+
+    const rows = await db.select().from(messages).where(eq(messages.orderId, 'ord_t'));
+    expect(rows).toHaveLength(0);
   });
 });

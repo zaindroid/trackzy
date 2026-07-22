@@ -1,4 +1,5 @@
 import type {
+  ClassifyTrackingExceptionResult,
   GeminiDisputeInput,
   GeminiDisputeResult,
   GeminiEnv,
@@ -8,6 +9,15 @@ import type {
   GeminiListingMatchInput,
   GeminiListingMatchResult,
 } from './iface.js';
+
+const TRACKING_EXCEPTION_SCHEMA = {
+  type: 'object',
+  properties: {
+    category: { type: 'string', enum: ['in_transit', 'delivered', 'exception', 'needs_review'] },
+    isStuckOrLost: { type: 'boolean' },
+  },
+  required: ['category', 'isStuckOrLost'],
+};
 
 const EXTRACT_SCHEMA = {
   type: 'object',
@@ -161,5 +171,25 @@ export class RealGeminiExtractor implements GeminiExtractor {
       listingMatchSchema(input.candidates.map((c) => c.id)),
     );
     return { chosenId: result.chosenId === 'none' ? null : result.chosenId, confidence: result.confidence };
+  }
+
+  /**
+   * Delivery-exception triage (spec section 9): only called for a raw
+   * carrier status the deterministic STATUS_MAP in webhooks.tracking.ts
+   * didn't recognize. Constrained to the same 4-value status vocabulary
+   * every mapped status already uses, so its output slots into
+   * `fulfillments.trackingStatus`/`tracking_events.status` exactly like a
+   * deterministic result would.
+   */
+  async classifyTrackingException(rawStatus: string): Promise<ClassifyTrackingExceptionResult> {
+    const prompt = [
+      'Classify this raw shipping carrier status into exactly one category.',
+      `Raw status: ${rawStatus}`,
+      'Categories: in_transit (still moving normally), delivered (successfully delivered),',
+      'exception (stuck, lost, returned, damaged, or otherwise failed), needs_review (unclear/ambiguous).',
+      'Also indicate whether this specifically looks stuck or lost (warranting a carrier claim).',
+    ].join('\n');
+
+    return this.generate<ClassifyTrackingExceptionResult>(prompt, TRACKING_EXCEPTION_SCHEMA);
   }
 }

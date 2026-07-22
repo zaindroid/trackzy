@@ -16,6 +16,7 @@ import { createSupplierClient } from '@fulfillment-tracker/adapters/suppliers';
 import { createShopifyClient } from '@fulfillment-tracker/adapters/shopify';
 import type { Env } from '../env.js';
 import { newId, now } from '../lib/id.js';
+import { draftDispute } from '../lib/draftDispute.js';
 import type { TrackingReceivedEvent } from './types.js';
 
 const MAX_TRACKING_TIMEOUT_RETRIES = 3; // initial wait + up to 2 more, per spec section 7 step 4
@@ -364,15 +365,3 @@ async function awaitDeliveryForFulfillment(
   }
 }
 
-async function draftDispute(env: Env, fulfillmentId: string, reason: string): Promise<void> {
-  try {
-    await env.DISPUTE_WORKFLOW?.create({
-      id: `dispute-${fulfillmentId}-${now()}`,
-      params: { fulfillmentId, reason },
-    });
-  } catch {
-    // Binding absent (test environment) or instance id collision — dispute
-    // drafting is best-effort from here; DisputeWorkflow itself is unit
-    // tested directly against the DB.
-  }
-}

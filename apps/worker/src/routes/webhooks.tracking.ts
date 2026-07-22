@@ -1,10 +1,13 @@
 import { Hono } from 'hono';
 import { verifyHmacSha256 } from '@fulfillment-tracker/adapters/hmac';
-import { createDb, fulfillments, webhookEvents } from '@fulfillment-tracker/db';
+import { createGeminiExtractor } from '@fulfillment-tracker/adapters/gemini';
+import { createDb, fulfillments, trackingEvents, webhookEvents } from '@fulfillment-tracker/db';
 import { eq } from 'drizzle-orm';
 import type { Env } from '../env.js';
 import { newId, now } from '../lib/id.js';
 import { safeGetWorkflowInstance } from '../lib/workflow.js';
+import { draftDispute } from '../lib/draftDispute.js';
+import { sendBuyerMessage, scheduleFeedbackReminder } from '../messaging.js';
 import type { TrackingStatusEvent } from '../workflows/types.js';
 
 interface SeventeenTrackWebhookPayload {
@@ -32,6 +35,13 @@ const app = new Hono<{ Bindings: Env }>();
  * DEPLOY.md TODO(HUMAN) to confirm 17TRACK's exact signature header against
  * their live docs once a real account is provisioned) and deduplicated by a
  * hash of the raw body, since 17TRACK does not send a stable event id.
+ *
+ * Delivery monitoring + exceptions triage (spec section 9): deterministic
+ * rules (STATUS_MAP) run first; a raw status STATUS_MAP doesn't recognize
+ * falls through to Gemini for structured classification — the fourth and
+ * final authorized LLM call site in this codebase. Every event (mapped or
+ * not) is recorded in `tracking_events`, not just ones that change
+ * `fulfillments.trackingStatus`.
  */
 app.post('/', async (c) => {
   const rawBody = await c.req.text();
@@ -70,19 +80,55 @@ app.post('/', async (c) => {
   });
 
   const payload = JSON.parse(rawBody) as SeventeenTrackWebhookPayload;
-  const status = STATUS_MAP[payload.data.track_info.latest_status.status];
+  const rawStatus = payload.data.track_info.latest_status.status;
+  // Deterministic map first; a status it doesn't recognize escalates to
+  // Gemini for structured classification (spec 9) — the broader 4-value type
+  // here (vs. the workflow's 3-value TrackingStatusEvent) is deliberate:
+  // 'needs_review' is a real, distinct outcome that must not silently
+  // masquerade as one of the other three when sent onward to the workflow.
+  const mapped = STATUS_MAP[rawStatus];
+  let status: 'in_transit' | 'delivered' | 'exception' | 'needs_review' = mapped ?? 'needs_review';
+  let isStuckOrLost = status === 'exception';
 
-  if (status) {
-    const [fulfillment] = await db
-      .select({ id: fulfillments.id, orderId: fulfillments.orderId })
-      .from(fulfillments)
-      .where(eq(fulfillments.trackingNumber, payload.data.number))
-      .limit(1);
+  if (!mapped) {
+    const gemini = createGeminiExtractor(c.env);
+    const classification = await gemini.classifyTrackingException(rawStatus);
+    status = classification.category;
+    isStuckOrLost = classification.isStuckOrLost;
+  }
 
-    if (fulfillment) {
+  const [fulfillment] = await db
+    .select({ id: fulfillments.id, orderId: fulfillments.orderId })
+    .from(fulfillments)
+    .where(eq(fulfillments.trackingNumber, payload.data.number))
+    .limit(1);
+
+  if (fulfillment) {
+    await db.insert(trackingEvents).values({
+      id: newId(),
+      fulfillmentId: fulfillment.id,
+      originalTracking: payload.data.number,
+      proxyTracking: null,
+      proxyCarrier: null,
+      status,
+      rawStatus,
+      createdAt: now(),
+    });
+
+    if (status !== 'needs_review') {
       const instance = await safeGetWorkflowInstance(c.env.ORDER_WORKFLOW, fulfillment.orderId);
       const event: TrackingStatusEvent = { fulfillmentId: fulfillment.id, status };
       await instance?.sendEvent({ type: 'tracking-status', payload: event });
+    }
+
+    if (status === 'delivered') {
+      await sendBuyerMessage(c.env, fulfillment.orderId, 'delivered').catch(() => undefined);
+      await scheduleFeedbackReminder(c.env, fulfillment.orderId).catch(() => undefined);
+    } else if (status === 'exception') {
+      await sendBuyerMessage(c.env, fulfillment.orderId, 'stalled').catch(() => undefined);
+      if (isStuckOrLost) {
+        await draftDispute(c.env, fulfillment.id, `Carrier reported a stuck/lost shipment: "${rawStatus}"`);
+      }
     }
   }
 

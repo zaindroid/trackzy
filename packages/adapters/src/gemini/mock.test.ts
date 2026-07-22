@@ -75,4 +75,26 @@ describe('MockGeminiExtractor', () => {
       expect(result).toEqual({ chosenId: null, confidence: 0 });
     });
   });
+
+  describe('classifyTrackingException', () => {
+    it('classifies a stuck/lost-sounding status as exception, flagged stuck or lost', async () => {
+      const result = await extractor.classifyTrackingException('Package appears lost in transit');
+      expect(result).toEqual({ category: 'exception', isStuckOrLost: true });
+    });
+
+    it('classifies a delivered-sounding status as delivered', async () => {
+      const result = await extractor.classifyTrackingException('Item left at front door');
+      expect(result).toEqual({ category: 'delivered', isStuckOrLost: false });
+    });
+
+    it('classifies a normal-movement status as in_transit', async () => {
+      const result = await extractor.classifyTrackingException('Departed facility, in transit to next hub');
+      expect(result).toEqual({ category: 'in_transit', isStuckOrLost: false });
+    });
+
+    it('falls back to needs_review for genuinely unclassifiable text', async () => {
+      const result = await extractor.classifyTrackingException('Status code 47B');
+      expect(result).toEqual({ category: 'needs_review', isStuckOrLost: false });
+    });
+  });
 });

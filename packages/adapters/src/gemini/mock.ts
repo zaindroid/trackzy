@@ -1,5 +1,6 @@
 import { fuzzyTitleSimilarity } from '@fulfillment-tracker/core';
 import type {
+  ClassifyTrackingExceptionResult,
   GeminiDisputeInput,
   GeminiDisputeResult,
   GeminiExtractInput,
@@ -8,6 +9,10 @@ import type {
   GeminiListingMatchInput,
   GeminiListingMatchResult,
 } from './iface.js';
+
+const STUCK_OR_LOST_KEYWORDS = /stuck|lost|missing|returned to sender|damaged|undeliverable|delayed indefinitely/i;
+const IN_TRANSIT_KEYWORDS = /transit|moving|departed|arrived at|out for delivery|customs/i;
+const DELIVERED_KEYWORDS = /delivered|left at|picked up by (?:customer|recipient)/i;
 
 const EMBEDDING_DIM = 64;
 
@@ -95,5 +100,18 @@ export class MockGeminiExtractor implements GeminiExtractor {
       return { chosenId: null, confidence: best.score };
     }
     return { chosenId: best.id, confidence: best.score };
+  }
+
+  async classifyTrackingException(rawStatus: string): Promise<ClassifyTrackingExceptionResult> {
+    if (STUCK_OR_LOST_KEYWORDS.test(rawStatus)) {
+      return { category: 'exception', isStuckOrLost: true };
+    }
+    if (DELIVERED_KEYWORDS.test(rawStatus)) {
+      return { category: 'delivered', isStuckOrLost: false };
+    }
+    if (IN_TRANSIT_KEYWORDS.test(rawStatus)) {
+      return { category: 'in_transit', isStuckOrLost: false };
+    }
+    return { category: 'needs_review', isStuckOrLost: false };
   }
 }

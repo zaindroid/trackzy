@@ -652,3 +652,56 @@ before each `phase2(N)` commit.
   before the reprice branch) — an out-of-stock listing gets paused and skipped in the same sweep pass
   rather than also being repriced against a supplier that can't currently fulfill it, avoiding a
   meaningless price update to a listing about to be paused anyway.
+
+## Milestone 9 — Messaging engine + exceptions triage
+- **`draftDispute` was extracted from `workflows/orderLogic.ts` into `apps/worker/src/lib/draftDispute.ts`**
+  unchanged in behavior (`env.DISPUTE_WORKFLOW?.create(...)` wrapped in try/catch, same "binding absent or
+  instance-id collision, either way best-effort" semantics documented back in Phase 1 milestone 6) — the
+  17TRACK webhook route now needs the exact same "best-effort start a dispute workflow" call for a
+  stuck/lost carrier-exception event that the order workflow already needed for a timed-out
+  `await-tracking` step, and the instruction to extract shared helpers rather than duplicate logic (already
+  the pattern for `extractTrackingCandidate`/`resolveSecretRef` in milestone 5) applied identically here.
+  `orderLogic.ts`'s own call site and tests are unaffected — pure extraction, no behavior change.
+- **The fourth and final authorized LLM call site (`classifyTrackingException`) only fires when the
+  deterministic `STATUS_MAP` in `webhooks.tracking.ts` doesn't recognize the carrier's raw status string**
+  — mirroring the exact "deterministic rules first, LLM only for what they can't classify" shape used for
+  `extractTrackingCandidate`'s email-parsing fallback in Phase 1/milestone 5. The route's local `status`
+  variable is deliberately typed as the broader 4-value union (`in_transit | delivered | exception |
+  needs_review`) rather than reusing the Workflow's 3-value `TrackingStatusEvent['status']` — `needs_review`
+  is a real, distinct outcome (a status Gemini itself couldn't confidently classify) that must not silently
+  collapse into one of the other three; the workflow only receives a `tracking-status` event when `status
+  !== 'needs_review'`, an explicit runtime guard that also satisfies TypeScript's narrowing.
+- **Every 17TRACK event (mapped or not, resolved to a known fulfillment or not) writes a `tracking_events`
+  row**, not just ones that change `fulfillments.trackingStatus` or reach the workflow — this is the
+  append-only audit log the table was designed to be back in milestone 1, and "was this status ever seen
+  and how did we classify it" needs to be answerable independent of whether it triggered a state change.
+- **`sendBuyerMessage`/`scheduleFeedbackReminder` calls from the webhook route are all best-effort
+  (`.catch(() => undefined)`)** — a messaging failure (e.g. the marketplace's message API rejects the
+  call) must never fail the 17TRACK webhook response itself, since 17TRACK will retry a non-200 and the
+  underlying tracking-status update already succeeded by that point. Same reasoning applied to the
+  `'shipped'` trigger call added to `trackingUploader.ts`'s success path.
+- **Message template rendering is plain `{{var}}` substitution against a small fixed var set (`sku`,
+  `trackingNumber`, `carrier`), not an LLM** — buyer messaging is explicitly out of scope for the four
+  allowed LLM call sites (hard rule section 2), and simple substitution is sufficient for the spec's
+  named triggers; `DEFAULT_BODIES` provides a sensible fallback body per trigger when the user hasn't
+  configured an active `message_templates` row for it, so the feature works out of the box in mock mode
+  without seed data covering every trigger.
+- **A storefront platform with no `OrderSource` implementation (Shopify) records `status: 'skipped'` for
+  buyer messages, not an error** — reuses `createOrderSourceForStorefront`'s existing `null`-for-Shopify
+  contract (milestone 8) rather than adding special-casing in the messaging engine; a `messages` row is
+  still written so the attempt is visible in the dashboard, just marked as not actually sent.
+- **Feedback reminders are a two-phase, age-gated flow** (`scheduleFeedbackReminder` inserts a `pending`
+  row immediately on delivery; `processPendingFeedbackReminders(env, minAgeMs)` — run from the same hourly
+  cron branch as milestone 8's repricing sweep — only sends rows older than `minAgeMs`, default 3 days)
+  rather than sending immediately on delivery, per the spec's own framing ("feedback reminders" implies a
+  deliberate delay, not an instant message indistinguishable from the delivery notification itself). The
+  age threshold is a plain function parameter (not yet a user setting) so it's directly testable without
+  manipulating wall-clock time.
+- **Two `webhooks.tracking.test.ts` cases assert only on the `'stalled'` buyer message and a clean 200
+  response, not on a `disputes` table row**, for a stuck/lost exception event — `wrangler.test.toml`
+  (documented limitation since Phase 1 milestone 5) has no `[[workflows]]` bindings, so
+  `env.DISPUTE_WORKFLOW` is `undefined` in every worker test and `draftDispute`'s optional-chained
+  `?.create(...)` is a guaranteed no-op in this environment. The actual `disputes`-row-writing behavior
+  lives inside `DisputeWorkflow.run()` and is already covered directly by
+  `workflows/disputeLogic.test.ts` — asserting on an unobservable table here would be testing the test
+  harness's binding gap, not real behavior.
