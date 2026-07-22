@@ -14,12 +14,10 @@ binding = "ASSETS"
 not_found_handling = "single-page-application"
 run_worker_first = true
 
-# D1 database. database_id is a placeholder until a real database is created.
-# TODO(HUMAN): `wrangler d1 create fulfillment-tracker-db` then paste the returned id below.
 [[d1_databases]]
 binding = "DB"
 database_name = "fulfillment-tracker-db"
-database_id = "PLACEHOLDER__D1_DATABASE_ID"
+database_id = "45d60393-e290-4550-8c87-166afc386de2"
 migrations_dir = "packages/db/migrations"
 
 # Queue: webhook fan-out only. Real work happens in Workflows, not here.
@@ -51,9 +49,12 @@ class_name = "DisputeWorkflow"
 
 # Non-secret runtime config. Secrets (tokens/keys) go through `.dev.vars` locally
 # and `wrangler secret put` in production — never committed here.
+# MOCK_MODE=false: Shopify + Gemini secrets are real (set via `wrangler secret
+# put`); 17TRACK/Clerk/supplier secrets are still unset, so those specific
+# adapters keep mocking via their own per-key placeholder detection.
 [vars]
-MOCK_MODE = "true"
-ENVIRONMENT = "development"
+MOCK_MODE = "false"
+ENVIRONMENT = "production"
 
 # Inbound supplier tracking emails arrive via Cloudflare Email Routing, which is
 # configured in the dashboard (see DEPLOY.md) and dispatches to this Worker's

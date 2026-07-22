@@ -263,3 +263,41 @@ patching colors:
   only page not exercised by any test). No headless browser was available in this sandbox to capture an
   actual screenshot, so this was verified by build success + test success + line-by-line class review
   rather than a visual diff.
+
+## First real deployment (post-build, human-directed)
+With the user's explicit go-ahead, deployed to their real Cloudflare account (not part of the
+autonomous build itself — the build's own hard rule against real `wrangler deploy` only applied to
+the unattended build session; this was a separate, explicitly authorized action).
+- **`wrangler d1 create` failed with a `/memberships` 400 (code 9106)** using the API token alone,
+  even though the token had D1/Queues/Workers Scripts edit permissions — `wrangler` tries to resolve
+  the account by listing memberships first, which needs a permission scope the token didn't have.
+  Fixed by passing `CLOUDFLARE_ACCOUNT_ID` explicitly, which skips that lookup entirely.
+- **`wrangler queues create` failed** with "message_retention_period must be between 60 and 86400
+  seconds" — the CLI's own default (`--message-retention-period-secs 345600`, i.e. 4 days) exceeds
+  this account's actual cap (1 day), which is stricter than what `wrangler --help` documents as the
+  valid range (up to 1209600). Fixed by passing `--message-retention-period-secs 3600` explicitly.
+- **`wrangler d1 execute --remote --file=seed.sql` failed** on the file's own `BEGIN TRANSACTION;` /
+  `COMMIT;` wrapper — D1's remote execution manages transactions itself and rejects manual SQL-level
+  transaction statements. Fixed by seeding remote D1 from a stripped copy (same INSERT statements,
+  `PRAGMA`/`BEGIN`/`COMMIT` lines removed) rather than editing `seed.sql` itself, since the local
+  `wrangler d1 execute --local` / in-memory sqlite validation path (used throughout the build and in
+  `pnpm db:seed`'s documented workflow) has no such restriction and the committed file should keep
+  working for that path unchanged.
+- Real credentials (Cloudflare API token, Shopify access token) were stored only in the session
+  scratchpad (`/tmp/.../scratchpad`, outside the repo, never git-tracked) and passed to `wrangler` via
+  environment variables per-command, never written into any committed file. The Gemini key is the one
+  exception: it lives in local `.dev.vars` (gitignored) per the project's existing local-dev
+  convention, and was additionally set as a real Worker secret via `wrangler secret put` for
+  production.
+- Inserted one additional real `storefronts` row (new ULID, `shop_domain =
+  'meanmachines-o33nvg56.myshopify.com'`) alongside the existing seeded demo storefront, both under
+  the same seeded demo `users` row (`clerk_user_id = 'dev-user'`) — so the dashboard's login and demo
+  dataset keep working exactly as before, while real Shopify webhooks now also have a matching
+  storefront to land against. No real supplier exists yet, so `evaluate-margin` will use the two
+  seeded fictional suppliers (still mock-priced, since `SUPPLIER_API_KEY` stays a placeholder) for any
+  real order until the user configures one — flagged to the user as a known limitation of "live but
+  supplier not yet real."
+- `wrangler.toml`'s `[vars]` flipped to `MOCK_MODE = "false"` / `ENVIRONMENT = "production"` now that
+  Shopify + Gemini have real secrets; 17TRACK/Clerk/supplier stay mocked automatically via their own
+  per-key placeholder detection (`isMockMode`), not by any additional config — exactly the behavior
+  this two-tier check was designed for back in milestone 4.
