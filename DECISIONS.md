@@ -117,3 +117,46 @@ Autonomous build session. Every non-obvious choice made without a human in the l
 - The Shopify webhook route resolves `storefronts.*_ref` pointers (`"env:SHOPIFY_WEBHOOK_SECRET"`) against
   the Worker's `env` at request time — consistent with the single-tenant dev-fallback convention already
   documented in `.dev.vars.example` and DECISIONS.md milestone 4.
+
+## Milestone 6 — Workflows (order + dispute)
+- The schema (spec section 5) has no table linking a SKU or order to a specific supplier — `fulfillments`
+  only gets a `supplier_id` once a fulfillment is placed. Since `evaluate-margin` must already know which
+  supplier to price against, `OrderWorkflow` picks the **oldest active supplier for the order's storefront
+  owner** (`suppliers.userId`, `active=1`, earliest `createdAt`) and uses it for the whole order. This is a
+  real simplification forced by the fixed schema (no `supplier_skus`/`products` table); a production system
+  would add one and route each line item to the supplier that actually stocks it.
+- `runOrderWorkflow` is a plain exported async function taking `{ step, env, orderId }`, with the
+  `WorkflowEntrypoint` class (`order.ts`) reduced to a one-line delegator. This is what makes spec 11's
+  "unit-test step functions with mocked step context" possible: tests construct a minimal fake `WorkflowStep`
+  (`.do` just invokes its callback immediately, `.waitForEvent` pops from a per-type queue and throws to
+  simulate a timeout once exhausted) and call `runOrderWorkflow` directly against the real D1 test database
+  from `cloudflare:test` — real business logic, fake orchestration wrapper. Same pattern for
+  `runDisputeWorkflow` / `disputeLogic.ts`.
+- The Shopify `fulfillmentOrderId` returned by the `fetch-fulfillment-order` step is threaded through as a
+  plain local variable / function parameter into `pushFulfillmentStep`, not re-fetched or re-derived later.
+  An earlier draft tried to reconstruct it from a line item's `fulfillmentOrderLineItemId` string, which is
+  wrong (the mock/real Shopify adapters use independent numeric namespaces for order-level vs. line-item-level
+  gids) — this is exactly the pattern Workflows is designed for: step results are checkpointed, so capturing
+  a step's return value in a local variable and passing it to a later step is correct and durable, not a
+  hack.
+- Multi-box shipments (spec 7 steps 4-6 looping) are matched to order line items via the tracking event's
+  optional `sku` field: an event naming a SKU covers only that line item; an event with no SKU is treated as
+  a single-box shipment covering everything still outstanding. This directly supports the "two tracking
+  events fully fulfill a 3-item order" test case (spec section 11) — event 1 names SKU-A (1 unit), event 2
+  has no SKU and sweeps the remaining SKU-B (2 units).
+- `await-tracking`'s timeout handling (spec 7 step 4: "wait again, up to 2 more cycles") is implemented as
+  up to 3 total `waitForEvent` attempts on the *same* fulfillment shell, each timeout drafting a dispute and
+  marking the order `exception` before retrying; this is distinct from the check-complete loop creating a
+  *new* fulfillment shell for the next box on a partial shipment — the two loops are related but not the
+  same thing, so they're implemented as separate constructs (`awaitTrackingForFulfillment`'s internal retry
+  loop vs. `runOrderWorkflow`'s outer `while (!complete)` loop) rather than conflated into one counter.
+- `await-delivery` (spec 7 step 7) is only awaited for the **final** fulfillment shell in a multi-box order,
+  as a pragmatic stand-in for whole-order delivery confirmation; the 17TRACK webhook route (milestone 5)
+  already updates any fulfillment's `tracking_status` directly regardless of workflow state, so per-box
+  status is still correct even though only the last box's delivery event resolves `orders.status` to
+  `'delivered'`.
+- `DisputeWorkflow` instances are started via `env.DISPUTE_WORKFLOW?.create(...)` wrapped in try/catch
+  inside `orderLogic.ts`'s `draftDispute()` helper — both "binding entirely absent" (test environment, see
+  milestone 5 decision on `wrangler.test.toml`) and "instance id collision" are swallowed, since dispute
+  drafting here is best-effort from the order workflow's perspective; `DisputeWorkflow`'s own logic is unit
+  tested directly and does not depend on how it was invoked.
