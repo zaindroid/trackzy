@@ -705,3 +705,74 @@ before each `phase2(N)` commit.
   lives inside `DisputeWorkflow.run()` and is already covered directly by
   `workflows/disputeLogic.test.ts` — asserting on an unobservable table here would be testing the test
   harness's binding gap, not real behavior.
+
+## Milestone 10 — Final Polish
+
+- **The worker's `Env` interface (`apps/worker/src/env.ts`) had a real, silent completeness gap**:
+  `AQUILINE_API_KEY` and `TRACKING_PROXY_PROVIDER` were read by `createTrackingProxyClient` (milestone
+  7) via the adapters package's own narrower `TrackingProxyEnv` type, but never declared on the
+  worker's `Env` at all — TypeScript's structural typing let `trackingUploader.ts` pass `env: Env` to a
+  function expecting `TrackingProxyEnv` without complaint, since a type missing an *optional* property
+  is still assignable to one that declares it optional. Caught while writing this milestone's
+  completeness pass (grepping every `env.SOME_VAR` reference across `packages/adapters/src` and
+  `apps/worker/src` and diffing against `Env`'s declared fields), not by any failing test — the gap was
+  real but invisible to `tsc`. Also found and added: `EBAY_API_BASE_URL`, `AMAZON_SP_API_BASE_URL`,
+  `AMAZON_BUSINESS_BASE_URL`, `ALIEXPRESS_GATEWAY_URL`, `CJ_BASE_URL`, `GMAIL_API_BASE_URL`,
+  `GEMINI_EMBEDDING_MODEL` — all optional per-adapter base-URL/model overrides with working defaults,
+  so nothing was ever actually broken at runtime, but `Env` is now the true source of truth for every
+  environment variable any adapter can read, matching the standard this project has held since Phase 1.
+  `TRACKING_PROXY_PROVIDER` is typed as the adapter's exact literal union (`'bluecare_express' |
+  'aquiline'`), not a bare `string` — a first attempt at `string` failed `pnpm typecheck` immediately
+  (a `string` isn't assignable to a narrower literal-union field on the target type), which is exactly
+  the kind of mismatch this polish pass exists to catch before it reaches a real deploy.
+- **Writing the spec-required comprehensive MOCK_MODE e2e test surfaced a second, more serious bug**:
+  `GET /api/extension/pending-tracking-uploads` (milestone 6) read `fulfillments.trackingNumber`
+  directly, but `pushTrackingWithProxy` (milestone 7, built after and never cross-checked against
+  milestone 6's endpoint) only ever persists the converted tracking number into `tracking_events`, not
+  back onto `fulfillments`. A non-API-mode eBay fulfillment with an Amazon Logistics `TBA...` number
+  would therefore have surfaced its *raw, un-proxied* number to the Chrome extension — meaning a human
+  would paste the literal Amazon Logistics tracking number into eBay's own DOM, precisely what the hard
+  architectural rule ("Amazon TBA→eBay tracking numbers MUST be proxied") exists to prevent. This is
+  the clearest evidence yet for why spec section 11 requires one chained e2e test in addition to each
+  milestone's isolated tests: milestones 6 and 7 were each fully green in isolation, but composed
+  incorrectly. Fixed by having the endpoint join against the most recent `tracking_events` row per
+  fulfillment and prefer its `proxyTracking`/`proxyCarrier` when present (`apps/worker/src/routes/api/extension.ts`),
+  falling back to the fulfillment's own tracking number for the (more common) non-proxied case. The
+  existing milestone-6 test (`extension.test.ts`) had been asserting against a hand-seeded fulfillment
+  row that *already contained* the post-proxy value (`'BCE7F3A9D2E1'` written directly into
+  `fulfillments.trackingNumber`) — which passed, but only because it never exercised the real
+  `pushTrackingWithProxy` code path that actually produces that value, silently masking the gap. Fixed
+  the test fixture to seed the *raw* `TBA...` number plus a separate `tracking_events` row (mirroring
+  what the real code path actually produces) and added a second case proving the passthrough fallback
+  still works when no proxy conversion was recorded.
+- **The e2e test (`apps/worker/src/e2e/mockModeDropship.test.ts`) seeds its manual task directly rather
+  than producing it via `matchListing()`** — spec section 11's own scenario prose says "eBay order →
+  scored to Amazon Retail → manual task created," but no milestone actually wired automatic manual-task
+  creation from order intake: `matchListing()`'s cascade (milestone 8) deliberately only searches
+  `kind='api'` suppliers (a manual supplier has no `searchProduct()` to call), and Phase 1's
+  `OrderWorkflow` — the only code that creates fulfillment-adjacent rows from a live order — was
+  deliberately left untouched and Shopify-only per "extend, don't rewrite" (milestone 2). Building a new
+  eBay/Amazon-aware order-orchestration workflow that also branches into manual-supplier task creation
+  was never one of the 10 explicit milestones; each milestone built one capability in isolation on the
+  understanding that a future integration milestone would wire full order-to-fulfillment orchestration
+  for the new marketplaces. Rather than silently paper over this with an implicit assumption, the test
+  seeds the manual task directly (documented inline) and proves every *downstream* piece — claim,
+  extension read, mark-ordered, Gmail resolution, tracking proxy, non-API queue, delivery, messaging —
+  composes correctly once given a starting manual task, which is exactly what was buildable within this
+  session's 10 milestones and is the same "test what's actually testable, document the rest" approach
+  used throughout Phase 2 for every external-API shape that couldn't be verified against a live
+  account.
+- **DEPLOY.md's Phase 2 sections (8–15) follow Phase 1's exact per-service structure** (a numbered
+  section per credential/account, each with a `TODO(HUMAN)` marker and the precise `wrangler secret
+  put` commands) rather than a single combined "set all these env vars" section — consistent with the
+  existing document's own convention and easier for a human to work through one integration at a time
+  rather than needing every credential before testing any single piece. Deploy became step 16 (was 8),
+  pushed down to make room; its content is otherwise unchanged from Phase 1 except noting
+  `pnpm build:extension` as a separate, non-bundled build step.
+- **`.dev.vars.example` was extended with every Phase 2 environment variable** — the ~19 credential
+  secrets named in the original build spec plus several optional base-URL/model overrides (commented
+  out, defaults noted inline) uncovered during this milestone's `Env`-completeness pass above — under a
+  clearly delimited "Phase 2" banner section, each following the exact same `PLACEHOLDER__` convention
+  Phase 1 established — so `MOCK_MODE`'s own placeholder-detection continues to correctly identify
+  every Phase 2 adapter as unconfigured out of the box, with no separate mock-detection logic needed
+  for the new variables.

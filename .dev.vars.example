@@ -27,3 +27,60 @@ CLERK_PUBLISHABLE_KEY=PLACEHOLDER__CLERK_PUBLISHABLE_KEY
 # --- Generic supplier REST API default key (per-supplier keys live in D1
 # `suppliers.api_key_ref`; this is the mock/dev fallback) ---
 SUPPLIER_API_KEY=PLACEHOLDER__SUPPLIER_API_KEY
+
+# =====================================================================
+# Phase 2 — Multi-Marketplace Dropshipping Automation
+# =====================================================================
+
+# --- eBay (Sell APIs: Fulfillment, Inventory, Post-Order) ---
+EBAY_CLIENT_ID=PLACEHOLDER__EBAY_CLIENT_ID
+EBAY_CLIENT_SECRET=PLACEHOLDER__EBAY_CLIENT_SECRET
+EBAY_OAUTH_ACCESS_TOKEN=PLACEHOLDER__EBAY_OAUTH_ACCESS_TOKEN
+EBAY_OAUTH_REFRESH_TOKEN=PLACEHOLDER__EBAY_OAUTH_REFRESH_TOKEN
+# Optional override; defaults to https://api.ebay.com
+# EBAY_API_BASE_URL=https://api.sandbox.ebay.com
+
+# --- Amazon SP-API (orders, RDT-gated PII address access, feeds, listings) ---
+AMAZON_LWA_CLIENT_ID=PLACEHOLDER__AMAZON_LWA_CLIENT_ID
+AMAZON_LWA_CLIENT_SECRET=PLACEHOLDER__AMAZON_LWA_CLIENT_SECRET
+AMAZON_MARKETPLACE_ID=PLACEHOLDER__AMAZON_MARKETPLACE_ID
+AMAZON_SELLER_ID=PLACEHOLDER__AMAZON_SELLER_ID
+AMAZON_OAUTH_ACCESS_TOKEN=PLACEHOLDER__AMAZON_OAUTH_ACCESS_TOKEN
+AMAZON_OAUTH_REFRESH_TOKEN=PLACEHOLDER__AMAZON_OAUTH_REFRESH_TOKEN
+# Optional override; defaults to https://sellingpartnerapi-na.amazon.com
+# AMAZON_SP_API_BASE_URL=https://sandbox.sellingpartnerapi-na.amazon.com
+
+# --- Amazon Business Ordering API (supplier, not the storefront above) ---
+AMAZON_BUSINESS_API_KEY=PLACEHOLDER__AMAZON_BUSINESS_API_KEY
+# Optional override; defaults to https://api.business.amazon.com
+# AMAZON_BUSINESS_BASE_URL=
+
+# --- AliExpress Open Platform (TOP-style HMAC-signed gateway) ---
+ALIEXPRESS_APP_KEY=PLACEHOLDER__ALIEXPRESS_APP_KEY
+ALIEXPRESS_APP_SECRET=PLACEHOLDER__ALIEXPRESS_APP_SECRET
+# Optional override; defaults to https://api-sg.aliexpress.com/sync
+# ALIEXPRESS_GATEWAY_URL=
+
+# --- CJ Dropshipping (long-lived pre-obtained access token, not OAuth) ---
+CJ_API_KEY=PLACEHOLDER__CJ_API_KEY
+# Optional override; defaults to https://developers.cjdropshipping.com/api2.0/v1
+# CJ_BASE_URL=
+
+# --- Gmail API (supplier shipping-confirmation email polling) ---
+GMAIL_CLIENT_ID=PLACEHOLDER__GMAIL_CLIENT_ID
+GMAIL_CLIENT_SECRET=PLACEHOLDER__GMAIL_CLIENT_SECRET
+GMAIL_OAUTH_ACCESS_TOKEN=PLACEHOLDER__GMAIL_OAUTH_ACCESS_TOKEN
+GMAIL_OAUTH_REFRESH_TOKEN=PLACEHOLDER__GMAIL_OAUTH_REFRESH_TOKEN
+# Optional override; defaults to https://gmail.googleapis.com
+# GMAIL_API_BASE_URL=
+
+# --- Tracking Conversion Middleware (Amazon Logistics -> eBay proxy) ---
+# Selects which proxy provider createTrackingProxyClient() uses; defaults to
+# bluecare_express. Set to "aquiline" to use the alternate provider instead.
+# TRACKING_PROXY_PROVIDER=bluecare_express
+BLUECARE_EXPRESS_API_KEY=PLACEHOLDER__BLUECARE_EXPRESS_API_KEY
+AQUILINE_API_KEY=PLACEHOLDER__AQUILINE_API_KEY
+
+# --- Gemini embeddings (SKU/listing fuzzy-match cascade, embedding stage) ---
+# Optional override; defaults to text-embedding-004
+# GEMINI_EMBEDDING_MODEL=text-embedding-004

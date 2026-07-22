@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import { and, eq, inArray, isNotNull } from 'drizzle-orm';
-import { createDb, fulfillments, manualTasks, orders, storefronts } from '@fulfillment-tracker/db';
+import { and, desc, eq, inArray, isNotNull } from 'drizzle-orm';
+import { createDb, fulfillments, manualTasks, orders, storefronts, trackingEvents } from '@fulfillment-tracker/db';
 import type { Env } from '../../env.js';
 import type { AuthedVariables } from '../../middleware/auth.js';
 import { errorResponse } from '../../lib/errors.js';
@@ -79,13 +79,30 @@ app.get('/pending-tracking-uploads', async (c) => {
       ),
     );
 
-  const uploads = rows.map((f) => ({
-    fulfillmentId: f.id,
-    externalOrderId: orderById.get(f.orderId)?.externalOrderId,
-    externalOrderNumber: orderById.get(f.orderId)?.externalOrderNumber,
-    trackingNumber: f.trackingNumber,
-    carrier: f.carrierFinal,
-  }));
+  // Prefer the most recent proxied tracking number/carrier over the
+  // fulfillment's raw one — e.g. an Amazon Logistics (TBA...) number must
+  // never reach eBay's DOM un-proxied (spec 7 hard rule). pushTrackingWithProxy
+  // always records this conversion in `tracking_events` before attempting the
+  // marketplace push, even when that push ends up deferred to this queue
+  // (NonApiModeError) — see DECISIONS.md.
+  const uploads = await Promise.all(
+    rows.map(async (f) => {
+      const [latestEvent] = await db
+        .select({ proxyTracking: trackingEvents.proxyTracking, proxyCarrier: trackingEvents.proxyCarrier })
+        .from(trackingEvents)
+        .where(and(eq(trackingEvents.fulfillmentId, f.id), isNotNull(trackingEvents.proxyTracking)))
+        .orderBy(desc(trackingEvents.createdAt))
+        .limit(1);
+
+      return {
+        fulfillmentId: f.id,
+        externalOrderId: orderById.get(f.orderId)?.externalOrderId,
+        externalOrderNumber: orderById.get(f.orderId)?.externalOrderNumber,
+        trackingNumber: latestEvent?.proxyTracking ?? f.trackingNumber,
+        carrier: latestEvent?.proxyCarrier ?? f.carrierFinal,
+      };
+    }),
+  );
 
   return c.json({ uploads });
 });

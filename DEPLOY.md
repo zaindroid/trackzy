@@ -122,7 +122,179 @@ automatically switches from the "Continue as dev user" mock login to Clerk's hos
 `clerk_user_id` matches the real Clerk user id (the mock's `dev-user` convention doesn't apply once
 Clerk is live) — either via `wrangler d1 execute ... --remote` or a small onboarding endpoint you add.
 
-## 8. Deploy
+---
+
+# Phase 2 — Multi-Marketplace Dropshipping Automation
+
+Everything below is additive to Phase 1's setup above. All of it stays mock-backed
+(`MOCK_MODE=true`, or per-adapter `PLACEHOLDER__` key detection) until you actually work through
+these steps — none of it is required for `pnpm dev` / `pnpm test`.
+
+## 8. eBay (Sell APIs: Fulfillment, Inventory, Post-Order) + non-API fallback
+
+**TODO(HUMAN)**: Register at the [eBay Developers Program](https://developer.ebay.com/), then:
+1. Create a **Keyset** (Production, once you're past sandbox testing) — this gives you
+   `EBAY_CLIENT_ID` (App ID) and `EBAY_CLIENT_SECRET` (Cert ID).
+2. Configure OAuth: set a redirect URI (RuName) and run eBay's 3-legged OAuth user-consent flow once,
+   by hand, to obtain an initial `EBAY_OAUTH_ACCESS_TOKEN` / `EBAY_OAUTH_REFRESH_TOKEN` pair scoped to
+   `https://api.ebay.com/oauth/api_scope/sell.fulfillment` and `.../sell.inventory` (the adapter
+   refreshes the access token itself thereafter via `RealEbayOrderSource.ensureFreshToken()` — you only
+   need to seed the *first* refresh token by hand).
+3. Set secrets:
+   ```
+   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put EBAY_CLIENT_ID --config ../../wrangler.toml
+   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put EBAY_CLIENT_SECRET --config ../../wrangler.toml
+   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put EBAY_OAUTH_ACCESS_TOKEN --config ../../wrangler.toml
+   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put EBAY_OAUTH_REFRESH_TOKEN --config ../../wrangler.toml
+   ```
+4. Insert a `storefronts` row with `platform = 'ebay'`, `oauth_access_token_ref` /
+   `oauth_refresh_token_ref` pointing at the two secrets above, and `non_api_mode` set to `1` **unless**
+   your eBay account is actually enrolled in the Fulfillment API's tracking-upload capability (many
+   individual seller accounts are not — see the next paragraph).
+5. **TODO(HUMAN)**: verify eBay's exact REST endpoint shapes for buyer messaging (Post-Order API
+   `casemanagement`) and split price/quantity updates (Inventory API `offer` vs. `inventory_item`
+   resources) against a live sandbox app — `packages/adapters/src/ebay/real.ts` was written to match
+   eBay's public docs as closely as possible without one (see DECISIONS.md milestone 2).
+
+**Non-API fallback (`non_api_mode = 1`)**: if tracking upload via the API isn't available to your
+account, leave `non_api_mode = 1`. `pushTracking` will throw `NonApiModeError` (caught by
+`trackingUploader.ts`, not an error), and the tracking number instead surfaces at
+`GET /api/extension/pending-tracking-uploads` for The Edge Agent (the Chrome extension, section 12
+below) to paste into eBay's own "Add tracking" page by hand.
+
+## 9. Amazon SP-API (orders, RDT-gated address access, feeds, listings)
+
+**TODO(HUMAN)**: Register as a [Selling Partner API developer](https://developer.amazonservices.com/)
+and create a **self-authorized private application** (the correct shape for a single seller
+integrating their own account, as opposed to a published third-party app — see DECISIONS.md milestone
+3 for why this means no AWS SigV4 signing is needed here):
+1. In Seller Central, authorize your own self-authorized app to get `AMAZON_LWA_CLIENT_ID` /
+   `AMAZON_LWA_CLIENT_SECRET` and an initial `AMAZON_OAUTH_REFRESH_TOKEN` (the LWA access token is
+   short-lived and refreshed automatically thereafter).
+2. Note your `AMAZON_SELLER_ID` and `AMAZON_MARKETPLACE_ID` (e.g. `ATVPDKIKX0DER` for amazon.com).
+3. **Request RDT (Restricted Data Token) access** under the "Restricted Data Token" section of your
+   app's permissions in Seller Central — this is what lets `RealAmazonOrderSource.fetchShippingAddress()`
+   call `POST /tokens/2021-03-01/restrictedDataToken` and receive PII (buyer name/address). Without
+   this grant, address-fetching calls will be rejected even with a valid LWA token.
+4. Set secrets:
+   ```
+   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put AMAZON_LWA_CLIENT_ID --config ../../wrangler.toml
+   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put AMAZON_LWA_CLIENT_SECRET --config ../../wrangler.toml
+   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put AMAZON_OAUTH_REFRESH_TOKEN --config ../../wrangler.toml
+   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put AMAZON_SELLER_ID --config ../../wrangler.toml
+   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put AMAZON_MARKETPLACE_ID --config ../../wrangler.toml
+   ```
+5. Insert a `storefronts` row with `platform = 'amazon'` and the matching `oauth_*_ref` pointers.
+6. **TODO(HUMAN)**: verify the Listings Items API's exact `purchasable_offer`/`fulfillment_availability`
+   JSON Patch shapes against your product type's real schema (they vary by category) before relying on
+   `listListings`/`updateListing` in production — see DECISIONS.md milestone 3.
+
+## 10. Amazon Business Ordering API (a *supplier*, not the storefront above)
+
+**TODO(HUMAN)**: Register for [Amazon Business](https://business.amazon.com/) API access (separate
+program from SP-API above — this is for *buying* from Amazon Business as a dropshipping supplier, not
+selling on Amazon). Obtain an API key and set:
+```
+pnpm --filter @fulfillment-tracker/worker exec wrangler secret put AMAZON_BUSINESS_API_KEY --config ../../wrangler.toml
+```
+Then insert/update a `suppliers` row with `provider = 'amazon_business'`, `kind = 'api'`, and
+`api_key_ref = 'env:AMAZON_BUSINESS_API_KEY'`.
+
+## 11. AliExpress Open Platform
+
+**TODO(HUMAN)**: Register an app at the [AliExpress Open Platform](https://openservice.aliexpress.com/)
+console, get `ALIEXPRESS_APP_KEY` / `ALIEXPRESS_APP_SECRET`, then:
+```
+pnpm --filter @fulfillment-tracker/worker exec wrangler secret put ALIEXPRESS_APP_KEY --config ../../wrangler.toml
+pnpm --filter @fulfillment-tracker/worker exec wrangler secret put ALIEXPRESS_APP_SECRET --config ../../wrangler.toml
+```
+Every request is signed with `packages/adapters/src/supplierApi/aliexpress/sign.ts` (HMAC-SHA256 over
+sorted, concatenated params) using `ALIEXPRESS_APP_SECRET` — no further manual signing setup needed.
+Insert/update a `suppliers` row with `provider = 'aliexpress'`, `kind = 'api'`.
+
+## 12. CJ Dropshipping
+
+**TODO(HUMAN)**: Create a [CJ Dropshipping](https://cjdropshipping.com/) account, then obtain a
+`CJ-Access-Token` via CJ's own email+password login endpoint **once, out-of-band** (their token is
+long-lived, ~15 days per their docs — deliberately not fetched automatically by this app on every
+request; see DECISIONS.md milestone 4 for why keeping your account password out of the Worker's
+request path entirely is safer). Set:
+```
+pnpm --filter @fulfillment-tracker/worker exec wrangler secret put CJ_API_KEY --config ../../wrangler.toml
+```
+You'll need to repeat the manual login step and rotate this secret roughly every two weeks (or before
+it expires) until/unless you automate the rotation yourself. Insert/update a `suppliers` row with
+`provider = 'cj'`, `kind = 'api'`.
+
+## 13. Gmail API (supplier shipping-confirmation email polling)
+
+**TODO(HUMAN)**: In the [Google Cloud Console](https://console.cloud.google.com/), create a project
+(or reuse the one from your Gemini key), enable the **Gmail API**, and create an OAuth 2.0 Client ID
+(type: Web application or Desktop, your choice — a Desktop client is simplest for a one-time manual
+consent flow). Then:
+1. Run Google's OAuth consent flow once, by hand, requesting the
+   `https://www.googleapis.com/auth/gmail.readonly` scope, to get an initial `GMAIL_OAUTH_REFRESH_TOKEN`.
+2. Set secrets:
+   ```
+   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put GMAIL_CLIENT_ID --config ../../wrangler.toml
+   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put GMAIL_CLIENT_SECRET --config ../../wrangler.toml
+   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put GMAIL_OAUTH_REFRESH_TOKEN --config ../../wrangler.toml
+   ```
+3. Update the relevant `users` row's `gmail_refresh_token_ref` (etc.) to point at these secrets — the
+   `*/5 * * * *` cron trigger (`apps/worker/src/scheduled.ts`) polls automatically from then on; no
+   further manual step is needed. Read-only scope is deliberate — this integration never sends,
+   modifies, or deletes anything in your inbox.
+
+## 14. Tracking Conversion Middleware (Bluecare Express / Aquiline)
+
+**TODO(HUMAN)**: This step is **mandatory before going live with any Amazon → eBay dropshipping
+route** — the hard architectural rule requires Amazon Logistics (`TBA...`) tracking numbers destined
+for an eBay buyer to be proxied through one of these two providers, never pushed to eBay raw (eBay's
+policies prohibit exposing Amazon as the shipper). Pick one:
+- [Bluecare Express](https://www.bluecareexpress.com/) (default provider) — register an account, get
+  an API key, set:
+  ```
+  pnpm --filter @fulfillment-tracker/worker exec wrangler secret put BLUECARE_EXPRESS_API_KEY --config ../../wrangler.toml
+  ```
+- [Aquiline](https://aquiline.com/) (alternate provider) — register, get an API key, set:
+  ```
+  pnpm --filter @fulfillment-tracker/worker exec wrangler secret put AQUILINE_API_KEY --config ../../wrangler.toml
+  pnpm --filter @fulfillment-tracker/worker exec wrangler secret put TRACKING_PROXY_PROVIDER --config ../../wrangler.toml
+  ```
+  (set the value of `TRACKING_PROXY_PROVIDER` to the literal string `aquiline`; omit it entirely to
+  keep the Bluecare Express default).
+
+Both real adapters (`packages/adapters/src/trackingProxy/{bluecareExpress,aquiline}/real.ts`) were
+written against each provider's publicly documented API shape without a live account to verify
+against — **TODO(HUMAN)**: confirm the exact request/response shape once you have a real account,
+before relying on this path in production. Until then, `pushTrackingWithProxy` (the single required
+call path — see DECISIONS.md milestone 7) still records every attempt in the `tracking_events` audit
+table, so a shape mismatch fails loudly rather than silently.
+
+## 15. The Edge Agent (Chrome extension)
+
+**TODO(HUMAN)**: This is a local/manual Chrome install, not a Cloudflare deployment step — Manifest V3
+extensions built for a single organization's internal tooling (rather than public distribution) don't
+need a Chrome Web Store listing.
+1. `pnpm build:extension` (from the repo root) — produces `apps/extension/dist/`.
+2. In Chrome, go to `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and
+   select `apps/extension/dist/`.
+3. Open the extension's popup and sign in the same way the dashboard does (in `MOCK_MODE`, the literal
+   `dev-user` bearer token; once Clerk is live, whatever token `apps/extension/src/popup/App.tsx`'s
+   auth flow obtains).
+4. Set the extension's backend URL (`apps/extension/src/lib/config.ts`) to your deployed Worker's URL
+   before building for anything other than local dev against `wrangler dev`.
+5. **TODO(HUMAN)**: `apps/extension/src/lib/addressMapping.ts`'s `DEFAULT_AMAZON_CHECKOUT_SELECTORS`
+   (the DOM selectors used to auto-paste a buyer's shipping address into Amazon's real checkout page)
+   are a best-effort guess written without a live checkout session to verify against — inspect Amazon's
+   actual checkout DOM once you're pasting into a real account and adjust the selectors if they've
+   drifted. Same caveat for `apps/extension/src/content/ebayTracking.ts`'s eBay "Add tracking" page
+   selectors.
+6. For a team beyond one person, publish to the Chrome Web Store as an **unlisted** (not public) item
+   instead of step 2's "Load unpacked" — out of scope to script here since it requires a Google
+   Developer account and a one-time $5 registration fee that only a human can pay.
+
+## 16. Deploy
 
 Once the steps above are done and secrets are set:
 ```
@@ -130,7 +302,8 @@ pnpm db:migrate:prod && pnpm build && wrangler deploy --config wrangler.toml
 ```
 (`pnpm build` must run first so `apps/dashboard/dist` exists for the `[assets]` binding — `wrangler
 deploy` alone will fail with "assets directory does not exist" otherwise, exactly like the dry-run
-validation this repo already runs in CI.)
+validation this repo already runs in CI.) Run `pnpm build:extension` separately (step 15) — the
+extension is a distinct deployable, not bundled into the Worker's assets.
 
 ## Known limitation: Workflows require Cloudflare connectivity even in local dev
 

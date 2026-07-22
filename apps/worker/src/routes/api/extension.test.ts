@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { env, SELF } from 'cloudflare:test';
-import { createDb, fulfillments, manualTasks, orders, storefronts, suppliers, users } from '@fulfillment-tracker/db';
+import { createDb, fulfillments, manualTasks, orders, storefronts, suppliers, trackingEvents, users } from '@fulfillment-tracker/db';
 import { eq } from 'drizzle-orm';
 
 const AUTH_HEADERS = { Authorization: 'Bearer dev-user', 'Content-Type': 'application/json' };
@@ -87,21 +87,33 @@ async function seed() {
       updatedAt: 0,
     },
   ]);
-  // Fulfillment 1: non-API-mode storefront, has tracking, not yet pushed -> SHOULD appear in the upload queue.
+  // Fulfillment 1: non-API-mode storefront, has (raw, pre-proxy) tracking, not yet pushed -> SHOULD
+  // appear in the upload queue, with the *proxied* tracking_events row's number surfaced instead of
+  // this raw one (pushTrackingWithProxy already ran and recorded the conversion — see extension.ts).
   await db.insert(fulfillments).values({
     id: 'ff_ext_pending_upload',
     orderId: 'ord_ext_nonapi',
     supplierId: 'sup_ext',
     costCents: 3200,
-    trackingNumber: 'BCE7F3A9D2E1',
-    carrierDeclared: null,
-    carrierDetected: null,
-    carrierFinal: null,
+    trackingNumber: 'TBA123456789012',
+    carrierDeclared: 'AMZL',
+    carrierDetected: 'AMZL',
+    carrierFinal: 'AMZL',
     trackingStatus: 'in_transit',
     pushedToStorefront: 0,
     source: 'supplier_api',
     createdAt: 0,
     updatedAt: 0,
+  });
+  await db.insert(trackingEvents).values({
+    id: 'te_ext_pending_upload',
+    fulfillmentId: 'ff_ext_pending_upload',
+    originalTracking: 'TBA123456789012',
+    proxyTracking: 'BCE7F3A9D2E1',
+    proxyCarrier: 'bluecare_express',
+    status: 'pending',
+    rawStatus: null,
+    createdAt: 0,
   });
   // Fulfillment 2: API-mode storefront, has tracking, not pushed -> should NOT appear (not non_api_mode).
   await db.insert(fulfillments).values({
@@ -152,13 +164,38 @@ describe('GET /api/extension/active-manual-task', () => {
 });
 
 describe('GET /api/extension/pending-tracking-uploads', () => {
-  it('includes only fulfillments on non_api_mode storefronts awaiting upload', async () => {
+  it('includes only fulfillments on non_api_mode storefronts awaiting upload, surfacing the proxied tracking number', async () => {
     const res = await SELF.fetch('https://worker.example.com/api/extension/pending-tracking-uploads', { headers: AUTH_HEADERS });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { uploads: { fulfillmentId: string; trackingNumber: string }[] };
+    const body = (await res.json()) as { uploads: { fulfillmentId: string; trackingNumber: string; carrier: string }[] };
     expect(body.uploads).toHaveLength(1);
     expect(body.uploads[0]?.fulfillmentId).toBe('ff_ext_pending_upload');
-    expect(body.uploads[0]?.trackingNumber).toBe('BCE7F3A9D2E1');
+    expect(body.uploads[0]?.trackingNumber).toBe('BCE7F3A9D2E1'); // proxied, not the raw TBA number
+    expect(body.uploads[0]?.carrier).toBe('bluecare_express');
+  });
+
+  it('falls back to the fulfillment\'s own tracking number when no proxy conversion was recorded', async () => {
+    const db = createDb(env.DB);
+    await db.insert(fulfillments).values({
+      id: 'ff_ext_no_proxy',
+      orderId: 'ord_ext_nonapi',
+      supplierId: 'sup_ext',
+      costCents: 1800,
+      trackingNumber: '70123456789012345674',
+      carrierDeclared: 'USPS',
+      carrierDetected: 'USPS',
+      carrierFinal: 'USPS',
+      trackingStatus: 'in_transit',
+      pushedToStorefront: 0,
+      source: 'supplier_api',
+      createdAt: 0,
+      updatedAt: 0,
+    });
+
+    const res = await SELF.fetch('https://worker.example.com/api/extension/pending-tracking-uploads', { headers: AUTH_HEADERS });
+    const body = (await res.json()) as { uploads: { fulfillmentId: string; trackingNumber: string }[] };
+    const noProxy = body.uploads.find((u) => u.fulfillmentId === 'ff_ext_no_proxy');
+    expect(noProxy?.trackingNumber).toBe('70123456789012345674'); // no tracking_events row -> unchanged passthrough
   });
 });
 
