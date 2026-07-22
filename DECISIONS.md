@@ -301,3 +301,64 @@ the unattended build session; this was a separate, explicitly authorized action)
   Shopify + Gemini have real secrets; 17TRACK/Clerk/supplier stay mocked automatically via their own
   per-key placeholder detection (`isMockMode`), not by any additional config — exactly the behavior
   this two-tier check was designed for back in milestone 4.
+
+---
+
+# Phase 2 — Multi-Marketplace Dropshipping Automation
+
+Extends the deployed Phase 1 platform (Shopify-only, single-supplier-pattern) into a multi-marketplace
+(eBay, Amazon, Shopify), multi-supplier-kind (API + manual/Chrome-extension) platform. Same autonomy
+rules as Phase 1: no pausing for input, missing credentials get an adapter + mock, everything green
+before each `phase2(N)` commit.
+
+## Milestone 1 — schema migrations + seed extension
+- `webhook_events.source` was deliberately left unchanged (`'shopify' | '17track' | 'email'`), not
+  extended with `'ebay'` / `'amazon'` — per spec sections 5a/5b, marketplace order ingestion is
+  **polling** (`OrderSource.listNewOrders(since)`, `storefronts.last_polled_at` as the cursor), not
+  inbound webhook push, so there is no "eBay webhook" to HMAC-verify or dedupe the way Shopify's
+  `orders/create` webhook works. `orders.raw_payload_id` was already nullable in the Phase 1 schema,
+  so polled marketplace orders simply have `raw_payload_id = NULL` — no schema change needed there.
+  (eBay does have an optional real-time notifications API; if that's wired up later, `'ebay'` can be
+  added to the `webhook_events.source` check then, following the same HMAC-verify-and-dedupe pattern
+  already established for Shopify/17TRACK — noted here rather than speculatively building it now.)
+- `suppliers.kind`/`provider`/`onTimeRate`/`priority` all got explicit `NOT NULL DEFAULT` values
+  (`'api'`, `'generic_rest'`, `1.0`, `0`) specifically so the migration stays purely additive — SQLite's
+  `ALTER TABLE ADD COLUMN` requires a default for any NOT NULL column added to a table with existing
+  rows, and the two Phase 1 seed suppliers (Acme, Globex) needed to end up with sensible values
+  post-migration without a manual backfill step. `avgShipDays`/`stockConfidence` were left nullable
+  instead (no natural "unset" numeric default for a real-valued shipping-performance metric) — verified
+  by round-tripping the Phase 1 `seed.sql` unchanged through the new schema (still applies cleanly,
+  existing suppliers land as `kind='api', provider='generic_rest'`, exactly the generic-REST shape they
+  already had).
+- `storefronts.platform`'s CHECK constraint change and `suppliers`' two new CHECK constraints forced
+  drizzle-kit into its "create __new_table, copy rows, drop, rename" strategy for those two tables
+  (SQLite can't `ALTER` a CHECK constraint in place) — same mechanism seen in Phase 1's own migration
+  generation, not a new concern, just confirming it still works correctly with data present this time
+  (validated by chaining both migrations + the old seed.sql through an in-memory SQLite DB, exactly as
+  Phase 1's milestone 3 did).
+- `tracking_events` gained a `createdAt` timestamp column beyond what the spec's field list named
+  (`id, fulfillment_id, original_tracking, proxy_tracking, proxy_carrier, status, raw_status`) — every
+  other table in the schema has one, and without it this table would be a single overwritten "current
+  state" row rather than a genuine append-only event log, which is what a *tracking events* table
+  needs to be to support the eventual "delivery monitoring" milestone (multiple status updates per
+  fulfillment over the shipment's lifetime). Its `status` column reuses the exact same 5-value
+  vocabulary as `fulfillments.trackingStatus` (`pending/in_transit/delivered/exception/needs_review`)
+  for consistency rather than inventing a parallel enum; `raw_status` holds the carrier/17TRACK's
+  original un-normalized status string, separate from our normalized `status`.
+- `messages.trigger` / `message_templates.trigger` include `'stalled'` even though the spec's schema
+  bullet for these tables only lists `sold, shipped, delivered, feedback_reminder` explicitly — the
+  Buyer Engagement capability description at the top of the spec says "Auto-messages on
+  sold/shipped/delivered/stalled", so `stalled` was added to both enums to keep the two spec sections
+  consistent rather than silently dropping a capability named in the feature list.
+- Seed data extended with: an eBay storefront (`non_api_mode=1`, demonstrating the Chrome-extension
+  fallback path) and an Amazon storefront (both OAuth-shaped, `PLACEHOLDER__`-equivalent refs); four
+  new suppliers covering every `provider` value (`amazon_business`, `aliexpress`, `cj`, and a
+  `kind='manual'` `amazon_retail` supplier); three new orders demonstrating (a) an Amazon-Logistics
+  (`TBA...`) tracking number actually proxied to a `BCE...` number in `tracking_events` — the literal
+  scenario the Tracking Conversion milestone must handle — (b) a `manual_tasks` row sitting `pending`
+  in what will become the Buy Queue, and (c) a plain USPS-tracked order proving the *negative* case
+  (non-Amazon-Logistics carriers are pushed straight through, no proxy row's `proxy_tracking` populated)
+  alongside two `messages` rows (`delivered` sent, `feedback_reminder` pending) and one `listings` +
+  `supplier_offers` pair with two competing offers already scored, so every Phase 2 dashboard page
+  planned in later milestones (Buy Queue, Catalog/Listings, Tracking, Messages) has non-empty seed data
+  from milestone 1 onward, matching the same "every page non-empty" convention Phase 1's seed followed.

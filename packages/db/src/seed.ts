@@ -56,6 +56,14 @@ const storefrontId = id();
 const supplierAcmeId = id();
 const supplierGlobexId = id();
 
+// --- phase 2 ids ---
+const ebayStorefrontId = id();
+const amazonStorefrontId = id();
+const supplierAmazonBusinessId = id();
+const supplierAliExpressId = id();
+const supplierCjId = id();
+const supplierManualAmazonRetailId = id();
+
 const users: Row[] = [
   { id: userId, clerk_user_id: 'dev-user', email: 'demo@fulfillment-tracker.dev', created_at: ts(0) },
 ];
@@ -69,6 +77,44 @@ const storefronts: Row[] = [
     access_token_ref: 'env:SHOPIFY_ACCESS_TOKEN',
     webhook_secret_ref: 'env:SHOPIFY_WEBHOOK_SECRET',
     created_at: ts(0),
+    marketplace_id: null,
+    oauth_refresh_token_ref: null,
+    oauth_access_token_ref: null,
+    oauth_expires_at: null,
+    last_polled_at: null,
+    non_api_mode: 0,
+  },
+  {
+    id: ebayStorefrontId,
+    user_id: userId,
+    platform: 'ebay',
+    shop_domain: 'demo-ebay-store',
+    access_token_ref: 'env:EBAY_ACCESS_TOKEN',
+    webhook_secret_ref: 'env:EBAY_WEBHOOK_SECRET',
+    created_at: ts(0),
+    marketplace_id: 'EBAY_US',
+    oauth_refresh_token_ref: 'env:EBAY_OAUTH_REFRESH_TOKEN',
+    oauth_access_token_ref: 'env:EBAY_OAUTH_ACCESS_TOKEN',
+    oauth_expires_at: ts(120),
+    last_polled_at: ts(-15),
+    // Demonstrates the Chrome Extension / non-API fallback path (spec 5a):
+    // pushTracking bypasses eBay's API entirely for this storefront.
+    non_api_mode: 1,
+  },
+  {
+    id: amazonStorefrontId,
+    user_id: userId,
+    platform: 'amazon',
+    shop_domain: 'demo-amazon-store',
+    access_token_ref: 'env:AMAZON_ACCESS_TOKEN',
+    webhook_secret_ref: 'env:AMAZON_WEBHOOK_SECRET',
+    created_at: ts(0),
+    marketplace_id: 'ATVPDKIKX0DER',
+    oauth_refresh_token_ref: 'env:AMAZON_OAUTH_REFRESH_TOKEN',
+    oauth_access_token_ref: 'env:AMAZON_OAUTH_ACCESS_TOKEN',
+    oauth_expires_at: ts(90),
+    last_polled_at: ts(-30),
+    non_api_mode: 0,
   },
 ];
 
@@ -83,6 +129,12 @@ const suppliers: Row[] = [
     parser_id: 'acme-supply-v1',
     active: 1,
     created_at: ts(0),
+    kind: 'api',
+    provider: 'generic_rest',
+    on_time_rate: 0.97,
+    avg_ship_days: 2.1,
+    stock_confidence: 0.95,
+    priority: 10,
   },
   {
     id: supplierGlobexId,
@@ -94,6 +146,81 @@ const suppliers: Row[] = [
     parser_id: 'globex-goods-v1',
     active: 1,
     created_at: ts(0),
+    kind: 'api',
+    provider: 'generic_rest',
+    on_time_rate: 0.91,
+    avg_ship_days: 3.4,
+    stock_confidence: 0.88,
+    priority: 5,
+  },
+  // --- phase 2 suppliers ---
+  {
+    id: supplierAmazonBusinessId,
+    user_id: userId,
+    name: 'Amazon Business',
+    api_base_url: 'https://sellingpartnerapi-na.amazon.com',
+    api_key_ref: 'env:AMAZON_BUSINESS_API_KEY',
+    email_sender_pattern: '@amazon.com',
+    parser_id: 'amazon-business-v1',
+    active: 1,
+    created_at: ts(0),
+    kind: 'api',
+    provider: 'amazon_business',
+    on_time_rate: 0.98,
+    avg_ship_days: 1.8,
+    stock_confidence: 0.97,
+    priority: 20,
+  },
+  {
+    id: supplierAliExpressId,
+    user_id: userId,
+    name: 'AliExpress Open Platform',
+    api_base_url: 'https://api.aliexpress.com',
+    api_key_ref: 'env:ALIEXPRESS_API_KEY',
+    email_sender_pattern: '@aliexpress.com',
+    parser_id: 'aliexpress-v1',
+    active: 1,
+    created_at: ts(0),
+    kind: 'api',
+    provider: 'aliexpress',
+    on_time_rate: 0.82,
+    avg_ship_days: 12.5,
+    stock_confidence: 0.7,
+    priority: 3,
+  },
+  {
+    id: supplierCjId,
+    user_id: userId,
+    name: 'CJ Dropshipping',
+    api_base_url: 'https://developers.cjdropshipping.com',
+    api_key_ref: 'env:CJ_API_KEY',
+    email_sender_pattern: '@cjdropshipping.com',
+    parser_id: 'cj-dropshipping-v1',
+    active: 1,
+    created_at: ts(0),
+    kind: 'api',
+    provider: 'cj',
+    on_time_rate: 0.89,
+    avg_ship_days: 7.2,
+    stock_confidence: 0.8,
+    priority: 8,
+  },
+  {
+    id: supplierManualAmazonRetailId,
+    user_id: userId,
+    name: 'Amazon Retail (Manual)',
+    api_base_url: 'https://www.amazon.com',
+    api_key_ref: 'PLACEHOLDER__NO_API_KEY_MANUAL_SUPPLIER',
+    email_sender_pattern: '@amazon.com',
+    parser_id: 'amazon-retail-manual-v1',
+    active: 1,
+    created_at: ts(0),
+    kind: 'manual',
+    provider: 'amazon_retail',
+    on_time_rate: 0.93,
+    avg_ship_days: 2.5,
+    stock_confidence: 0.6,
+    priority: 1,
   },
 ];
 
@@ -113,6 +240,13 @@ const orderLineItems: Row[] = [];
 const fulfillments: Row[] = [];
 const fulfillmentLineItems: Row[] = [];
 const disputes: Row[] = [];
+// --- phase 2 rows ---
+const listings: Row[] = [];
+const supplierOffers: Row[] = [];
+const manualTasks: Row[] = [];
+const trackingEvents: Row[] = [];
+const messageTemplates: Row[] = [];
+const messages: Row[] = [];
 
 function shopifyWebhookEvent(n: number, orderNumber: string, minutesAgo: number): string {
   const weId = id();
@@ -430,6 +564,360 @@ function shopifyWebhookEvent(n: number, orderNumber: string, minutesAgo: number)
   });
 }
 
+// --- Order 7: eBay order, Amazon Logistics (TBA) tracking, proxied to a
+// marketplace-compliant BCE number before being pushed to eBay (spec 7). ---
+{
+  const orderId = id();
+  orders.push({
+    id: orderId,
+    storefront_id: ebayStorefrontId,
+    external_order_id: 'ebay-16-11635-28233',
+    external_order_number: '16-11635-28233',
+    status: 'shipped',
+    currency: 'USD',
+    subtotal_cents: 5999,
+    shipping_cents: 0,
+    margin_cents: 2799,
+    raw_payload_id: null, // eBay orders are polled (listNewOrders), not webhook-pushed
+    created_at: ts(-900),
+    updated_at: ts(-820),
+  });
+  const li1 = id();
+  orderLineItems.push({
+    id: li1,
+    order_id: orderId,
+    external_line_item_id: 'ebay-li-16-11635-28233-1',
+    fulfillment_order_line_item_id: null,
+    sku: 'WIDGET-RED-L',
+    title: 'Widget - Red / Large (eBay)',
+    quantity: 1,
+    quantity_fulfilled: 1,
+    unit_price_cents: 5999,
+  });
+  const fId = id();
+  fulfillments.push({
+    id: fId,
+    order_id: orderId,
+    supplier_id: supplierAmazonBusinessId,
+    cost_cents: 3200,
+    tracking_number: 'TBA123456789012',
+    carrier_declared: 'AMZL',
+    carrier_detected: 'AMZL',
+    carrier_final: 'AMZL',
+    tracking_status: 'in_transit',
+    pushed_to_storefront: 1,
+    source: 'supplier_api',
+    created_at: ts(-880),
+    updated_at: ts(-820),
+  });
+  fulfillmentLineItems.push({ id: id(), fulfillment_id: fId, order_line_item_id: li1, quantity: 1 });
+  trackingEvents.push({
+    id: id(),
+    fulfillment_id: fId,
+    original_tracking: 'TBA123456789012',
+    proxy_tracking: 'BCE7F3A9D2E1',
+    proxy_carrier: 'bluecare_express',
+    status: 'in_transit',
+    raw_status: 'In Transit',
+    created_at: ts(-820),
+  });
+  messages.push({
+    id: id(),
+    order_id: orderId,
+    trigger: 'shipped',
+    template_id: null,
+    body: 'Good news — your order is on the way! Tracking: BCE7F3A9D2E1 (Bluecare Express).',
+    status: 'sent',
+    sent_at: ts(-819),
+    created_at: ts(-820),
+  });
+}
+
+// --- Order 8: eBay order sourced to a MANUAL supplier (Amazon Retail) —
+// sitting in the Buy Queue awaiting a human + the Chrome extension (spec 6d). ---
+{
+  const orderId = id();
+  orders.push({
+    id: orderId,
+    storefront_id: ebayStorefrontId,
+    external_order_id: 'ebay-19-04471-90215',
+    external_order_number: '19-04471-90215',
+    status: 'fulfilling',
+    currency: 'USD',
+    subtotal_cents: 4250,
+    shipping_cents: 0,
+    margin_cents: 1400,
+    raw_payload_id: null,
+    created_at: ts(-45),
+    updated_at: ts(-40),
+  });
+  const li1 = id();
+  orderLineItems.push({
+    id: li1,
+    order_id: orderId,
+    external_line_item_id: 'ebay-li-19-04471-90215-1',
+    fulfillment_order_line_item_id: null,
+    sku: 'GIZMO-GREEN-S',
+    title: 'Gizmo - Green / Small',
+    quantity: 1,
+    quantity_fulfilled: 0,
+    unit_price_cents: 4250,
+  });
+  const fId = id();
+  fulfillments.push({
+    id: fId,
+    order_id: orderId,
+    supplier_id: supplierManualAmazonRetailId,
+    cost_cents: null,
+    tracking_number: null,
+    carrier_declared: null,
+    carrier_detected: null,
+    carrier_final: null,
+    tracking_status: 'pending',
+    pushed_to_storefront: 0,
+    source: 'manual',
+    created_at: ts(-40),
+    updated_at: ts(-40),
+  });
+  manualTasks.push({
+    id: id(),
+    order_id: orderId,
+    supplier_id: supplierManualAmazonRetailId,
+    state: 'pending',
+    payload_json: JSON.stringify({
+      sku: 'GIZMO-GREEN-S',
+      quantity: 1,
+      maxCostCents: 3500,
+      shipTo: {
+        name: 'Jordan Buyer',
+        address1: '742 Evergreen Terrace',
+        city: 'Springfield',
+        state: 'IL',
+        zip: '62704',
+        country: 'US',
+      },
+    }),
+    created_at: ts(-40),
+    updated_at: ts(-40),
+  });
+}
+
+// --- Order 9: eBay order fulfilled via CJ Dropshipping, plain USPS tracking —
+// NOT Amazon Logistics, so it is pushed straight through with no proxy step. ---
+{
+  const orderId = id();
+  orders.push({
+    id: orderId,
+    storefront_id: ebayStorefrontId,
+    external_order_id: 'ebay-11-88203-44120',
+    external_order_number: '11-88203-44120',
+    status: 'delivered',
+    currency: 'USD',
+    subtotal_cents: 3499,
+    shipping_cents: 0,
+    margin_cents: 1050,
+    raw_payload_id: null,
+    created_at: ts(-4320),
+    updated_at: ts(-2000),
+  });
+  const li1 = id();
+  orderLineItems.push({
+    id: li1,
+    order_id: orderId,
+    external_line_item_id: 'ebay-li-11-88203-44120-1',
+    fulfillment_order_line_item_id: null,
+    sku: 'GADGET-BLUE-M',
+    title: 'Gadget - Blue / Medium',
+    quantity: 1,
+    quantity_fulfilled: 1,
+    unit_price_cents: 3499,
+  });
+  const fId = id();
+  fulfillments.push({
+    id: fId,
+    order_id: orderId,
+    supplier_id: supplierCjId,
+    cost_cents: 2000,
+    tracking_number: '70123456789012345674',
+    carrier_declared: 'USPS',
+    carrier_detected: 'USPS',
+    carrier_final: 'USPS',
+    tracking_status: 'delivered',
+    pushed_to_storefront: 1,
+    source: 'supplier_api',
+    created_at: ts(-4200),
+    updated_at: ts(-2000),
+  });
+  fulfillmentLineItems.push({ id: id(), fulfillment_id: fId, order_line_item_id: li1, quantity: 1 });
+  trackingEvents.push(
+    {
+      id: id(),
+      fulfillment_id: fId,
+      original_tracking: '70123456789012345674',
+      proxy_tracking: null,
+      proxy_carrier: null,
+      status: 'in_transit',
+      raw_status: 'InTransit',
+      created_at: ts(-3000),
+    },
+    {
+      id: id(),
+      fulfillment_id: fId,
+      original_tracking: '70123456789012345674',
+      proxy_tracking: null,
+      proxy_carrier: null,
+      status: 'delivered',
+      raw_status: 'Delivered',
+      created_at: ts(-2000),
+    },
+  );
+  messages.push(
+    {
+      id: id(),
+      order_id: orderId,
+      trigger: 'delivered',
+      template_id: null,
+      body: 'Your order has been delivered. We hope you love it!',
+      status: 'sent',
+      sent_at: ts(-1999),
+      created_at: ts(-2000),
+    },
+    {
+      id: id(),
+      order_id: orderId,
+      trigger: 'feedback_reminder',
+      template_id: null,
+      body: "If you have a moment, we'd really appreciate your feedback on your recent purchase.",
+      status: 'pending',
+      sent_at: null,
+      created_at: ts(-1900),
+    },
+  );
+}
+
+// --- Catalog: listings + scored supplier offers (spec 3 "Catalog Ops") ---
+{
+  const listingMatchedId = id();
+  listings.push(
+    {
+      id: listingMatchedId,
+      storefront_id: ebayStorefrontId,
+      external_listing_id: 'ebay-listing-widget-red-l',
+      sku: 'WIDGET-RED-L',
+      title: 'Widget - Red / Large',
+      price_cents: 5999,
+      quantity_available: 42,
+      supplier_id: supplierAmazonBusinessId,
+      supplier_product_id: 'B0EXAMPLE001',
+      match_confidence: 1.0,
+      match_source: 'exact_sku',
+      auto_reprice: 1,
+      auto_pause: 1,
+      status: 'active',
+      created_at: ts(-2000),
+      updated_at: ts(-30),
+    },
+    {
+      id: id(),
+      storefront_id: amazonStorefrontId,
+      external_listing_id: 'amz-listing-gadget-blue-m',
+      sku: 'GADGET-BLUE-M',
+      title: 'Gadget Blue Medium Size — Fast Shipping',
+      price_cents: 8999,
+      quantity_available: 0,
+      supplier_id: supplierAliExpressId,
+      supplier_product_id: 'AE10000123',
+      match_confidence: 0.93,
+      match_source: 'fuzzy_title',
+      auto_reprice: 1,
+      auto_pause: 1,
+      status: 'paused_out_of_stock',
+      created_at: ts(-2000),
+      updated_at: ts(-60),
+    },
+    {
+      id: id(),
+      storefront_id: ebayStorefrontId,
+      external_listing_id: 'ebay-listing-gizmo-green-s',
+      sku: 'GIZMO-GREEN-S',
+      title: 'Gizmo (Green, Small) - Fast Ship',
+      price_cents: 7499,
+      quantity_available: 15,
+      supplier_id: null,
+      supplier_product_id: null,
+      match_confidence: null,
+      match_source: null,
+      auto_reprice: 0,
+      auto_pause: 1,
+      status: 'active',
+      created_at: ts(-2000),
+      updated_at: ts(-2000),
+    },
+  );
+  supplierOffers.push(
+    {
+      id: id(),
+      listing_id: listingMatchedId,
+      supplier_id: supplierAmazonBusinessId,
+      supplier_product_id: 'B0EXAMPLE001',
+      cost_cents: 3200,
+      shipping_cents: 0,
+      in_stock: 1,
+      ship_days: 1.5,
+      score: 0.94,
+      checked_at: ts(-30),
+    },
+    {
+      id: id(),
+      listing_id: listingMatchedId,
+      supplier_id: supplierAcmeId,
+      supplier_product_id: 'ACME-WIDGET-RED-L',
+      cost_cents: 3400,
+      shipping_cents: 350,
+      in_stock: 1,
+      ship_days: 2.5,
+      score: 0.81,
+      checked_at: ts(-30),
+    },
+  );
+}
+
+// --- Standard buyer-message templates (spec "Buyer Engagement") ---
+messageTemplates.push(
+  {
+    id: id(),
+    user_id: userId,
+    trigger: 'sold',
+    body_template: "Thanks for your order! We're getting {{sku}} ready to ship.",
+    active: 1,
+    created_at: ts(0),
+  },
+  {
+    id: id(),
+    user_id: userId,
+    trigger: 'shipped',
+    body_template: 'Good news — your order is on the way! Tracking: {{trackingNumber}} ({{carrier}}).',
+    active: 1,
+    created_at: ts(0),
+  },
+  {
+    id: id(),
+    user_id: userId,
+    trigger: 'delivered',
+    body_template: 'Your order has been delivered. We hope you love it!',
+    active: 1,
+    created_at: ts(0),
+  },
+  {
+    id: id(),
+    user_id: userId,
+    trigger: 'feedback_reminder',
+    body_template: "If you have a moment, we'd really appreciate your feedback on your recent purchase.",
+    active: 1,
+    created_at: ts(0),
+  },
+);
+
 // A malformed/unmatched supplier email — surfaces in the "Needs review" list.
 webhookEvents.push({
   id: id(),
@@ -455,6 +943,12 @@ const sql = [
   insert('fulfillments', fulfillments),
   insert('fulfillment_line_items', fulfillmentLineItems),
   insert('disputes', disputes),
+  insert('listings', listings),
+  insert('supplier_offers', supplierOffers),
+  insert('manual_tasks', manualTasks),
+  insert('tracking_events', trackingEvents),
+  insert('message_templates', messageTemplates),
+  insert('messages', messages),
   'COMMIT;',
 ]
   .filter(Boolean)
