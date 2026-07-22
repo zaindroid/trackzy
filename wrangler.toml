@@ -63,7 +63,8 @@ ENVIRONMENT = "production"
 [[send_email]]
 name = "DISPUTE_EMAIL"
 
-# Gmail inbox polling (spec 6b) — every 5 minutes. Keep in sync with
-# apps/worker/src/scheduled.ts's GMAIL_POLL_CRON constant.
+# Gmail inbox polling (spec 6b, every 5 min) + hourly repricing/stock-sync
+# sweep (spec section 10). Keep in sync with apps/worker/src/scheduled.ts's
+# GMAIL_POLL_CRON / REPRICING_SWEEP_CRON constants.
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["*/5 * * * *", "0 * * * *"]

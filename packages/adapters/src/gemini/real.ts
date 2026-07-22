@@ -5,6 +5,8 @@ import type {
   GeminiExtractInput,
   GeminiExtractResult,
   GeminiExtractor,
+  GeminiListingMatchInput,
+  GeminiListingMatchResult,
 } from './iface.js';
 
 const EXTRACT_SCHEMA = {
@@ -27,6 +29,19 @@ const DISPUTE_SCHEMA = {
   },
   required: ['subject', 'body'],
 };
+
+function listingMatchSchema(candidateIds: string[]) {
+  return {
+    type: 'object',
+    properties: {
+      // Gemini's structured output enums must be non-empty; a "none" sentinel
+      // keeps the schema valid even when the caller passes zero candidates.
+      chosenId: { type: 'string', enum: [...candidateIds, 'none'] },
+      confidence: { type: 'number' },
+    },
+    required: ['chosenId', 'confidence'],
+  };
+}
 
 export class RealGeminiExtractor implements GeminiExtractor {
   constructor(private readonly env: GeminiEnv) {}
@@ -106,5 +121,45 @@ export class RealGeminiExtractor implements GeminiExtractor {
       .join('\n');
 
     return this.generate<GeminiDisputeResult>(prompt, DISPUTE_SCHEMA);
+  }
+
+  async embedText(text: string): Promise<number[]> {
+    const model = this.env.GEMINI_EMBEDDING_MODEL ?? 'text-embedding-004';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:embedContent?key=${this.env.GEMINI_API_KEY ?? ''}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: { parts: [{ text }] } }),
+    });
+    if (!res.ok) {
+      throw new Error(`Gemini embedding request failed: ${res.status} ${await res.text()}`);
+    }
+    const json = (await res.json()) as { embedding: { values: number[] } };
+    return json.embedding.values;
+  }
+
+  /**
+   * Final SKU/listing-matching cascade stage (spec section 8): constrained to
+   * choosing one of the provided candidate ids (or "none") — never a
+   * free-text answer, so the LLM can only narrow an already-bounded
+   * decision, not invent a product that doesn't exist in our data.
+   */
+  async pickBestListingMatch(input: GeminiListingMatchInput): Promise<GeminiListingMatchResult> {
+    if (input.candidates.length === 0) {
+      return { chosenId: null, confidence: 0 };
+    }
+
+    const prompt = [
+      'You are matching a marketplace listing to the correct supplier product.',
+      `Listing title: ${input.targetTitle}`,
+      'Candidate supplier products (choose the id of the one that is the same physical product, or "none" if none match):',
+      ...input.candidates.map((c) => `- id=${c.id}: ${c.title}`),
+    ].join('\n');
+
+    const result = await this.generate<{ chosenId: string; confidence: number }>(
+      prompt,
+      listingMatchSchema(input.candidates.map((c) => c.id)),
+    );
+    return { chosenId: result.chosenId === 'none' ? null : result.chosenId, confidence: result.confidence };
   }
 }

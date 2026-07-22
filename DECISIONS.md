@@ -596,3 +596,59 @@ before each `phase2(N)` commit.
   a non-API mode, so a marketplace-agnostic error type would be speculative generalization for a
   capability nothing else needs yet. Noted here as the one coupling point worth revisiting if a second
   marketplace ever grows its own non-API fallback.
+
+## Milestone 8 — Catalog ops (scoring, matching, repricing, stock sync)
+- **The matching cascade's first three stages (exact SKU, fuzzy title, embedding-similarity ranking) are
+  pure functions in `packages/core`** (`fuzzyMatch.ts`, `matching.ts`) — they take already-scored
+  candidates and decide whether there's an unambiguous winner, but never call an embedding API
+  themselves. `packages/core` has zero Cloudflare/network dependencies by design (established in
+  Phase 1), so the actual embedding generation happens in the Gemini adapter and gets threaded through
+  by the worker-layer orchestrator (`apps/worker/src/catalog/matchListing.ts`). Fuzzy title similarity
+  uses Dice's coefficient (bigram overlap) rather than Levenshtein or Jaro-Winkler — it needs no new
+  dependency, is O(n), and is precise enough for short product-title strings; the "≥ 0.9" spec threshold
+  and an "ambiguity margin" (candidates within 3 points of each other don't count as a clear winner) are
+  both directly unit tested with hand-verified numeric fixtures (dice-coefficient scores were computed
+  externally and checked before being hardcoded into test assertions, after two rounds of test-fixture
+  corrections when initial hand-picked example titles didn't actually clear the thresholds I intended).
+- **The `GeminiExtractor` interface grew two more methods** (`embedText`, `pickBestListingMatch`),
+  updating the "ONLY call sites" doc comment from Phase 1's two to Phase 2's four — this is intentional,
+  spec-authorized growth (hard rule section 2 explicitly names "SKU/listing matching (ambiguous cases
+  only)" as one of exactly four allowed LLM call sites), not scope creep. `pickBestListingMatch` is
+  constrained to choosing one of the caller-provided candidate ids (or a `"none"` sentinel in the
+  response schema) — it can never return a product that wasn't in the candidate list, keeping the "LLM
+  narrows an already-bounded decision, never invents one" property the dispute-drafting and
+  extraction-fallback call sites also have.
+- **The mock embedding is a deterministic hashed-bigram histogram** (64 buckets, L2-normalized) rather
+  than a fixed/random vector — chosen specifically so mock-mode tests exercise *real* cosine-similarity
+  behavior (similar titles genuinely score higher than dissimilar ones) instead of just returning
+  canned numbers, the same "mocks should be genuine simplified implementations, not stubs" principle
+  used for `MockGeminiExtractor.extractTracking`'s regex scan back in Phase 1.
+- **`matchListing()` searches every active `kind='api'` supplier via `SupplierApiClient.searchProduct()`
+  using the listing's own title as the query** to gather candidates, then runs the cascade across all of
+  them combined (not per-supplier) — discovered empirically that the mock suppliers' `searchProduct`
+  fixtures append a supplier-name suffix to the query (e.g. `"<title> (CJ Dropshipping)"`), which scores
+  well below the 0.9 fuzzy-title threshold (~0.65-0.72, verified numerically), so realistic mock-mode
+  matches resolve via the embedding stage — the worker-level test asserts on structural outcomes
+  (a match was found and persisted, from a non-`exact_sku` source, since mock search results never carry
+  a `sku`) rather than pinning to one specific cascade stage, since which stage wins depends on
+  interacting hash functions not worth hand-verifying byte-for-byte.
+- **Repricing/stock-sync target margin reuses `settings.minMarginPercent`** (the same per-user setting
+  Phase 1's order-level margin evaluation already reads) rather than adding a separate
+  "catalog target margin" field — one fewer setting for the user to reason about, and the spec doesn't
+  distinguish "order margin" from "listing margin" as separate concepts. Marketplace fees are a flat
+  `$0` placeholder (`TODO(HUMAN)`: eBay's final value fee ~13%, Amazon's referral fee 8-15% by category)
+  since neither is knowable generically without per-category rate tables out of scope for this
+  milestone; the price-change threshold (3%) is a hardcoded constant, not yet a user setting.
+- **`createOrderSourceForStorefront` is a new shared helper** (`apps/worker/src/lib/`) resolving OAuth
+  tokens + building the right `OrderSource` for a storefront, with the refresh callback persisting a
+  renewed `oauthExpiresAt` back onto `storefronts` — pulled out as reusable specifically because both
+  the repricing sweep (this milestone) and the messaging engine (milestone 9, not yet built) need "give
+  me a live OrderSource for this storefront's platform" and neither should re-derive the OAuth
+  credential-resolution plumbing independently. Returns `null` for Shopify (and any future platform
+  without an `OrderSource` implementation) — callers skip the marketplace-push step gracefully rather
+  than erroring, since a Shopify listing simply has no catalog-ops push path yet (Shopify's own Admin
+  Products API would be a separate integration, out of this milestone's scope).
+- **Stock-out pausing takes priority over repricing for a given listing** (checked and short-circuits
+  before the reprice branch) — an out-of-stock listing gets paused and skipped in the same sweep pass
+  rather than also being repriced against a supplier that can't currently fulfill it, avoiding a
+  meaningless price update to a listing about to be paused anyway.

@@ -5,3 +5,6 @@ export * from './parsers/types.js';
 export * from './parsers/carrierName.js';
 export * from './parsers/registry.js';
 export * from './trackingProxy.js';
+export * from './fuzzyMatch.js';
+export * from './matching.js';
+export * from './repricing.js';

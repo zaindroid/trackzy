@@ -48,4 +48,4 @@ ENVIRONMENT = "test"
 name = "DISPUTE_EMAIL"
 
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["*/5 * * * *", "0 * * * *"]

@@ -1,10 +1,38 @@
+import { fuzzyTitleSimilarity } from '@fulfillment-tracker/core';
 import type {
   GeminiDisputeInput,
   GeminiDisputeResult,
   GeminiExtractInput,
   GeminiExtractResult,
   GeminiExtractor,
+  GeminiListingMatchInput,
+  GeminiListingMatchResult,
 } from './iface.js';
+
+const EMBEDDING_DIM = 64;
+
+function hashBigram(bigram: string): number {
+  let h = 0;
+  for (let i = 0; i < bigram.length; i++) h = (h * 31 + bigram.charCodeAt(i)) >>> 0;
+  return h % EMBEDDING_DIM;
+}
+
+/**
+ * Deterministic, hashed-bigram "embedding": similar text shares bigrams and
+ * therefore has high cosine similarity, dissimilar text doesn't — a
+ * realistic enough stand-in for testing the matching cascade's embedding
+ * stage without a live Gemini key.
+ */
+function mockEmbed(text: string): number[] {
+  const normalized = text.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const vector = new Array(EMBEDDING_DIM).fill(0) as number[];
+  for (let i = 0; i < normalized.length - 1; i++) {
+    const bucket = hashBigram(normalized.slice(i, i + 2));
+    vector[bucket] = (vector[bucket] ?? 0) + 1;
+  }
+  const norm = Math.sqrt(vector.reduce((sum, v) => sum + v * v, 0)) || 1;
+  return vector.map((v) => v / norm);
+}
 
 /**
  * Deterministic, fixture-free stand-in for the LLM: scans for any
@@ -47,5 +75,25 @@ export class MockGeminiExtractor implements GeminiExtractor {
         'Fulfillment Tracker',
       ].join('\n'),
     };
+  }
+
+  async embedText(text: string): Promise<number[]> {
+    return mockEmbed(text);
+  }
+
+  async pickBestListingMatch(input: GeminiListingMatchInput): Promise<GeminiListingMatchResult> {
+    if (input.candidates.length === 0) {
+      return { chosenId: null, confidence: 0 };
+    }
+    const scored = input.candidates
+      .map((c) => ({ id: c.id, score: fuzzyTitleSimilarity(input.targetTitle, c.title) }))
+      .sort((a, b) => b.score - a.score);
+    const best = scored[0]!;
+    // Below this, even the mock's "best guess" is too weak to call a match —
+    // mirrors a real LLM declining to force a pick among poor options.
+    if (best.score < 0.2) {
+      return { chosenId: null, confidence: best.score };
+    }
+    return { chosenId: best.id, confidence: best.score };
   }
 }

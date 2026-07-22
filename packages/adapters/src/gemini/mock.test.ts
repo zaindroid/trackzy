@@ -31,4 +31,48 @@ describe('MockGeminiExtractor', () => {
     expect(result.subject).toContain('1Z999AA10123456780');
     expect(result.body).toContain('No scan update in 7 days');
   });
+
+  describe('embedText', () => {
+    it('is deterministic for the same input', async () => {
+      const a = await extractor.embedText('Widget Red Large');
+      const b = await extractor.embedText('Widget Red Large');
+      expect(a).toEqual(b);
+    });
+
+    it('gives similar text high cosine similarity and dissimilar text low similarity', async () => {
+      const a = await extractor.embedText('Widget Red Large');
+      const b = await extractor.embedText('Widget Red Large 2');
+      const c = await extractor.embedText('Totally unrelated gizmo product');
+
+      const cosine = (x: number[], y: number[]) => x.reduce((sum, v, i) => sum + v * (y[i] ?? 0), 0);
+      expect(cosine(a, b)).toBeGreaterThan(cosine(a, c));
+    });
+  });
+
+  describe('pickBestListingMatch', () => {
+    it('picks the candidate with the highest title similarity', async () => {
+      const result = await extractor.pickBestListingMatch({
+        targetTitle: 'Widget - Red / Large',
+        candidates: [
+          { id: 'p1', title: 'Widget Red Large 2' },
+          { id: 'p2', title: 'Completely unrelated product' },
+        ],
+      });
+      expect(result.chosenId).toBe('p1');
+      expect(result.confidence).toBeGreaterThan(0.8);
+    });
+
+    it('returns null when no candidate is a plausible match', async () => {
+      const result = await extractor.pickBestListingMatch({
+        targetTitle: 'Widget Red Large',
+        candidates: [{ id: 'p1', title: 'Xylophone Zebra Quilt' }],
+      });
+      expect(result.chosenId).toBeNull();
+    });
+
+    it('returns null with zero confidence for an empty candidate list', async () => {
+      const result = await extractor.pickBestListingMatch({ targetTitle: 'Widget', candidates: [] });
+      expect(result).toEqual({ chosenId: null, confidence: 0 });
+    });
+  });
 });
