@@ -58,11 +58,14 @@ AMAZON_BUSINESS_API_KEY=PLACEHOLDER__AMAZON_BUSINESS_API_KEY
 # --- AliExpress Open Platform (TOP-style HMAC-signed gateway) ---
 ALIEXPRESS_APP_KEY=PLACEHOLDER__ALIEXPRESS_APP_KEY
 ALIEXPRESS_APP_SECRET=PLACEHOLDER__ALIEXPRESS_APP_SECRET
-# The OAuth access token ("session") for the specific AliExpress dropshipping
-# account these calls act on behalf of — required for account-scoped methods
-# like aliexpress.ds.order.create, not just app_key/app_secret. Pre-obtained,
-# not auto-refreshed (see packages/adapters/src/supplierApi/aliexpress/real.ts).
-ALIEXPRESS_ACCESS_TOKEN=PLACEHOLDER__ALIEXPRESS_ACCESS_TOKEN
+# Seed values only — these become the initial suppliers.oauth_access_token_ref /
+# oauth_refresh_token_ref pointers ("env:ALIEXPRESS_OAUTH_ACCESS_TOKEN") for the
+# AliExpress supplier row. AliExpress's access tokens are short-lived (~1 day
+# per the console), so RealAliExpressClient auto-refreshes and overwrites those
+# ref columns with the live literal token after the first refresh — these
+# static secrets are only ever read once, to seed the very first request.
+ALIEXPRESS_OAUTH_ACCESS_TOKEN=PLACEHOLDER__ALIEXPRESS_OAUTH_ACCESS_TOKEN
+ALIEXPRESS_OAUTH_REFRESH_TOKEN=PLACEHOLDER__ALIEXPRESS_OAUTH_REFRESH_TOKEN
 # Optional override; defaults to https://api-sg.aliexpress.com/sync
 # ALIEXPRESS_GATEWAY_URL=
 

@@ -901,3 +901,43 @@ path) and wouldn't have surfaced until a real integration attempt.
   any test) asserts `session` is present in the signed request body when the token is set, and — equally
   important — *absent* (not an empty string) when it isn't, directly guarding the fix against a silent
   regression back to "always send session, even blank."
+
+## Post-milestone-10 — AliExpress upgraded from static token to full OAuth refresh (real account data)
+
+The static-secret fix above was superseded within the same setup session, once the user's real
+AliExpress Open Platform app showed its actual token lifetimes under "Auth Management": **1-day access
+tokens, 2-day refresh tokens**. A static, never-refreshed secret (the CJ-style pattern the previous fix
+used) would have broken within a day — this account's tokens are genuinely too short-lived for that
+approach, confirming the "TODO(HUMAN): extend to full refresh if manual renewal proves impractical"
+note left in the previous fix. Also confirmed, encouragingly: the App Console's "AliExpress-dropship"
+API permission group was already `Active` immediately on app creation, alongside "System Tool" — no
+separate approval step was needed in practice, resolving the uncertainty flagged in DEPLOY.md.
+- **`suppliers` gained three nullable OAuth columns** (`oauth_access_token_ref`, `oauth_refresh_token_ref`,
+  `oauth_expires_at`), migration `0003_clean_zemo.sql` — plain `ALTER TABLE ADD COLUMN`, no CHECK/FK
+  involvement at all (unlike the `storefronts.platform` situation), so this one is safe to apply directly
+  to the real remote database with no special handling. Mirrors `storefronts.oauth*`/`users.gmail*`
+  exactly: `*_ref` columns holding either an `env:VAR_NAME` pointer or (after the first refresh) the
+  literal current token value, per `resolveSecretRef`'s existing dual-mode contract.
+- **`RealAliExpressClient`'s constructor now takes `(env, tokens, onTokenRefreshed)`** instead of just
+  `env`, with a new `ensureFreshSession()` mirroring eBay/Amazon/Gmail's `ensureFreshToken()` — checked
+  before every signed call, refreshing via a `method=auth/token/refresh` request through the same signed
+  gateway (TOP-family APIs typically route auth operations through the same endpoint, not a separate
+  REST path — flagged `TODO(HUMAN)` to verify the exact shape once tested against the account for real).
+  A small local `AliExpressTokenSet`/`AliExpressOnTokenRefreshed` pair was defined in `aliexpress/iface.ts`
+  rather than importing `OAuthTokenSet` from `orderSource/iface.ts` — same "keep SupplierApiClient and
+  OrderSource decoupled" precedent from milestones 2/4, identical shape by convention, not by shared type.
+- **New worker-level resolver** (`apps/worker/src/lib/supplierApiClientForSupplier.ts`), mirroring
+  `createOrderSourceForStorefront` exactly: resolves a `suppliers` row's OAuth tokens for AliExpress
+  specifically (all other providers still go through the unchanged, simpler `createSupplierApiClient`),
+  with a refresh callback that overwrites `oauth_access_token_ref`/`oauth_refresh_token_ref` with the
+  literal refreshed values. **`createSupplierApiClient('aliexpress', env)` now throws** rather than
+  silently constructing a client with an empty session — the old env-only signature has no way to supply
+  per-supplier tokens, so making the old call path fail loudly (with a message pointing at the new
+  resolver) prevents it from ever being silently reintroduced by a future call site that doesn't know
+  about the new requirement. `matchListing.ts`'s two call sites were updated to the new resolver;
+  `index.test.ts`'s AliExpress dispatch test was rewritten to assert the throw instead.
+- **Renamed the env secret from `ALIEXPRESS_ACCESS_TOKEN` to `ALIEXPRESS_OAUTH_ACCESS_TOKEN` +
+  `ALIEXPRESS_OAUTH_REFRESH_TOKEN`**, matching the exact naming convention every other OAuth-backed
+  secret in this codebase uses (`EBAY_OAUTH_*`, `AMAZON_OAUTH_*`, `GMAIL_OAUTH_*`) — these are now
+  explicitly documented as *seed* values only, read once to bootstrap the first request; every
+  subsequent refresh persists onto the `suppliers` row itself, not back into the static secret.

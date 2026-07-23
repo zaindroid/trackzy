@@ -14,9 +14,10 @@ import {
   type MatchResult,
 } from '@fulfillment-tracker/core';
 import { createGeminiExtractor } from '@fulfillment-tracker/adapters/gemini';
-import { createSupplierApiClient, type SupplierApiProvider } from '@fulfillment-tracker/adapters/supplierApi';
+import type { SupplierApiProvider } from '@fulfillment-tracker/adapters/supplierApi';
 import type { Env } from '../env.js';
 import { newId, now } from '../lib/id.js';
+import { createSupplierApiClientForSupplier } from '../lib/supplierApiClientForSupplier.js';
 
 const API_MATCHABLE_PROVIDERS: SupplierApiProvider[] = ['amazon_business', 'aliexpress', 'cj'];
 const CANDIDATES_PER_SUPPLIER = 3;
@@ -64,7 +65,7 @@ export async function matchListing(env: Env, listingId: string): Promise<MatchRe
 
   const candidates: CandidateWithSupplier[] = [];
   for (const supplier of matchableSuppliers) {
-    const client = createSupplierApiClient(supplier.provider as SupplierApiProvider, env);
+    const client = await createSupplierApiClientForSupplier(env, db, supplier);
     const found = await client.searchProduct(listing.title);
     for (const product of found.slice(0, CANDIDATES_PER_SUPPLIER)) {
       candidates.push({ supplierProductId: product.supplierProductId, title: product.title, sku: product.sku, supplierId: supplier.id });
@@ -144,7 +145,7 @@ async function persistMatch(
   const [supplier] = await db.select().from(suppliers).where(eq(suppliers.id, matchedCandidate.supplierId));
   if (!supplier) return;
 
-  const client = createSupplierApiClient(supplier.provider as SupplierApiProvider, env);
+  const client = await createSupplierApiClientForSupplier(env, db, supplier);
   const offer = await client.getOffer(result.supplierProductId);
 
   const [existingOffer] = await db

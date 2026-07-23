@@ -75,6 +75,14 @@ export const suppliers = sqliteTable(
     avgShipDays: real('avg_ship_days'),
     stockConfidence: real('stock_confidence'),
     priority: integer('priority').notNull().default(0),
+    // OAuth token refs for suppliers whose API needs a per-account, refreshable
+    // access token (e.g. AliExpress's session param) rather than a static key —
+    // same *_ref-column + refresh-callback-overwrites-with-literal-value
+    // convention already used for storefronts.oauth*/users.gmail* (see
+    // DECISIONS.md). Nullable: only populated for suppliers that need it.
+    oauthAccessTokenRef: text('oauth_access_token_ref'),
+    oauthRefreshTokenRef: text('oauth_refresh_token_ref'),
+    oauthExpiresAt: integer('oauth_expires_at'),
   },
   (t) => ({
     kindCheck: check('suppliers_kind_check', sql`${t.kind} in ('api', 'manual')`),

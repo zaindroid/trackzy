@@ -220,28 +220,44 @@ Then insert/update a `suppliers` row with `provider = 'amazon_business'`, `kind 
 ## 11. AliExpress Open Platform
 
 **TODO(HUMAN)**: Register an app at the [AliExpress Open Platform](https://openservice.aliexpress.com/)
-console to get `ALIEXPRESS_APP_KEY` / `ALIEXPRESS_APP_SECRET` — this app-registration step is
-self-serve. **Getting approved for the Dropshipping API (`aliexpress.ds.*` methods) specifically may
-require an additional application/approval step beyond basic app registration** — check the console for
-a "Dropshipping"/"DS" API product and its own access request flow; this project has no way to verify
-that approval process without a live account.
+console (App Category "Drop Shipping") to get `ALIEXPRESS_APP_KEY` / `ALIEXPRESS_APP_SECRET` — this
+step is fully self-serve, and the "AliExpress-dropship" API permission group is granted automatically
+alongside "System Tool" when the app is created (no separate approval step observed in practice).
+
+**Check your app's "Auth Management" page for its actual Access/Refresh Token Duration** — one real
+account observed **1-day access tokens / 2-day refresh tokens**, which is why this adapter
+auto-refreshes (`RealAliExpressClient.ensureFreshSession()`) rather than treating the token as a
+long-lived static secret the way CJ's is treated. As long as something touches this supplier at least
+once every couple of days (the repricing sweep alone does, hourly), the refresh token should keep
+rolling forward indefinitely — **TODO(HUMAN)**: confirm AliExpress actually rotates the refresh token
+on each use (extending its 2-day window) rather than keeping a fixed expiry from initial authorization;
+if it's the latter, full re-authorization (steps 2 below) will be needed roughly every 2 days.
+
 1. Register the app, get `ALIEXPRESS_APP_KEY` / `ALIEXPRESS_APP_SECRET`.
 2. Run AliExpress's OAuth authorization flow once (as the specific AliExpress account that will
-   actually fulfill dropshipping orders) to obtain `ALIEXPRESS_ACCESS_TOKEN` — this is the `session`
-   system parameter every account-scoped Dropshipping API call requires (e.g. `aliexpress.ds.order.create`);
-   without it, only public/catalog-level calls would work. **TODO(HUMAN)**: confirm the token's actual
-   lifetime once you have one — if it's short-lived, `RealAliExpressClient` currently treats it as a
-   static, manually-renewed secret (like CJ's), not an auto-refreshing OAuth token set like eBay/Amazon/
-   Gmail; extend it to that pattern if manual renewal turns out to be too frequent to be practical.
-3. Set secrets:
+   actually fulfill dropshipping orders) to obtain an initial `ALIEXPRESS_OAUTH_ACCESS_TOKEN` /
+   `ALIEXPRESS_OAUTH_REFRESH_TOKEN` pair — the callback URL is whatever you set on the app (doesn't need
+   to be a real working endpoint; the authorization `code` appears in the browser's address bar after
+   redirect even if nothing responds there). Exchange the code for tokens via the same signed gateway
+   (`method=auth/token/create`) or your console's own token-generation tool if it has one.
+   **TODO(HUMAN)**: the exact exchange/refresh endpoint shapes (`auth/token/create`,
+   `auth/token/refresh`) are unverified against a live account — confirm against AliExpress's actual
+   docs once you're here; `RealAliExpressClient`'s refresh implementation is flagged the same way.
+3. Set secrets (these only seed the *first* request — `RealAliExpressClient` persists every subsequent
+   refreshed token onto the `suppliers` row itself, not back into these static secrets):
    ```
    pnpm --filter @fulfillment-tracker/worker exec wrangler secret put ALIEXPRESS_APP_KEY --config ../../wrangler.toml
    pnpm --filter @fulfillment-tracker/worker exec wrangler secret put ALIEXPRESS_APP_SECRET --config ../../wrangler.toml
-   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put ALIEXPRESS_ACCESS_TOKEN --config ../../wrangler.toml
+   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put ALIEXPRESS_OAUTH_ACCESS_TOKEN --config ../../wrangler.toml
+   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put ALIEXPRESS_OAUTH_REFRESH_TOKEN --config ../../wrangler.toml
    ```
+4. Insert a `suppliers` row with `provider = 'aliexpress'`, `kind = 'api'`, and
+   `oauth_access_token_ref = 'env:ALIEXPRESS_OAUTH_ACCESS_TOKEN'` /
+   `oauth_refresh_token_ref = 'env:ALIEXPRESS_OAUTH_REFRESH_TOKEN'` — the same `env:`-pointer convention
+   every other OAuth-backed row in this schema uses (see DECISIONS.md).
+
 Every request is signed with `packages/adapters/src/supplierApi/aliexpress/sign.ts` (HMAC-SHA256 over
 sorted, concatenated params) using `ALIEXPRESS_APP_SECRET` — no further manual signing setup needed.
-Insert/update a `suppliers` row with `provider = 'aliexpress'`, `kind = 'api'`.
 
 ## 12. CJ Dropshipping
 

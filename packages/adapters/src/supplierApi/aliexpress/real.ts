@@ -7,8 +7,10 @@ import type {
   SupplierTrackingResult,
 } from '../iface.js';
 import { TokenBucket, fetchWithBackoff } from '../../rateLimit.js';
-import type { AliExpressEnv } from './iface.js';
+import type { AliExpressEnv, AliExpressOnTokenRefreshed, AliExpressTokenSet } from './iface.js';
 import { signAliExpressParams } from './sign.js';
+
+const TOKEN_REFRESH_MARGIN_MS = 5 * 60_000;
 
 function newBucket(): TokenBucket {
   return new TokenBucket({ capacity: 8, refillPerSecond: 2 });
@@ -26,24 +28,67 @@ function newBucket(): TokenBucket {
  * account these calls act on behalf of) is a required TOP system param for
  * account-scoped methods like `aliexpress.ds.order.create` — unlike
  * `app_key`/`app_secret` (this app's own identity), `session` identifies
- * *whose* dropshipping relationship the call executes under. It's read here
- * as a static, pre-obtained secret (`ALIEXPRESS_ACCESS_TOKEN`), the same
- * "acquired once, out-of-band" shape as CJ's `CJ_API_KEY` — not a
- * self-refreshing OAuth token set like eBay/Amazon/Gmail. TODO(HUMAN):
- * confirm this account's actual token lifetime once registered and, if it's
- * short-lived enough to need automatic refresh, extend this to the
- * OAuthTokenSet + refresh-callback pattern those adapters use.
+ * *whose* dropshipping relationship the call executes under. Unlike CJ's
+ * long-lived pre-obtained key, AliExpress's console shows a 1-day access
+ * token / 2-day refresh token — short-lived enough that a static secret
+ * would break within a day, so this client self-refreshes exactly like
+ * eBay/Amazon/Gmail (`ensureFreshSession()` below), reporting the new token
+ * via `onTokenRefreshed` so the caller can persist it. TODO(HUMAN): the
+ * refresh endpoint (`auth/token/refresh` via the same signed gateway) is
+ * unverified against a live account — confirm the exact method name/response
+ * shape once registered, per DEPLOY.md.
  */
 export class RealAliExpressClient implements SupplierApiClient {
   private readonly bucket = newBucket();
+  private tokens: AliExpressTokenSet;
 
-  constructor(private readonly env: AliExpressEnv) {}
+  constructor(
+    private readonly env: AliExpressEnv,
+    tokens: AliExpressTokenSet,
+    private readonly onTokenRefreshed: AliExpressOnTokenRefreshed,
+  ) {
+    this.tokens = tokens;
+  }
 
   private gatewayUrl(): string {
     return this.env.ALIEXPRESS_GATEWAY_URL ?? 'https://api-sg.aliexpress.com/sync';
   }
 
+  private async ensureFreshSession(): Promise<string> {
+    if (this.tokens.expiresAt - TOKEN_REFRESH_MARGIN_MS > Date.now()) {
+      return this.tokens.accessToken;
+    }
+    const refreshParams: Record<string, string> = {
+      app_key: this.env.ALIEXPRESS_APP_KEY ?? '',
+      method: 'auth/token/refresh',
+      timestamp: String(Date.now()),
+      format: 'json',
+      v: '2.0',
+      sign_method: 'sha256',
+      refresh_token: this.tokens.refreshToken,
+    };
+    const sign = await signAliExpressParams(refreshParams, this.env.ALIEXPRESS_APP_SECRET ?? '');
+    const body = new URLSearchParams({ ...refreshParams, sign });
+    const res = await fetchWithBackoff(
+      this.gatewayUrl(),
+      { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body },
+      this.bucket,
+    );
+    if (!res.ok) {
+      throw new Error(`AliExpress OAuth token refresh failed: ${res.status} ${await res.text()}`);
+    }
+    const json = (await res.json()) as { access_token: string; refresh_token: string; expire_time: number };
+    this.tokens = {
+      accessToken: json.access_token,
+      refreshToken: json.refresh_token,
+      expiresAt: json.expire_time,
+    };
+    await this.onTokenRefreshed(this.tokens);
+    return this.tokens.accessToken;
+  }
+
   private async call<T>(method: string, businessParams: Record<string, string>): Promise<T> {
+    const session = await this.ensureFreshSession();
     const systemParams: Record<string, string> = {
       app_key: this.env.ALIEXPRESS_APP_KEY ?? '',
       method,
@@ -51,7 +96,7 @@ export class RealAliExpressClient implements SupplierApiClient {
       format: 'json',
       v: '2.0',
       sign_method: 'sha256',
-      ...(this.env.ALIEXPRESS_ACCESS_TOKEN ? { session: this.env.ALIEXPRESS_ACCESS_TOKEN } : {}),
+      session,
     };
     const allParams = { ...systemParams, ...businessParams };
     const sign = await signAliExpressParams(allParams, this.env.ALIEXPRESS_APP_SECRET ?? '');
