@@ -810,3 +810,62 @@ and would have reproduced on literally every real deployment within about an hou
   since MOCK_MODE makes that code path unreachable in every existing worker test the same way it does
   for Gmail — the adapter-level test plus identical code-review of the (structurally identical) second
   call site was judged sufficient given neither eBay nor Amazon is live yet.
+
+## Post-milestone-10 — Phase 2 remote migration retrofit (KNOWN GAP: `storefronts.platform` CHECK)
+
+Applying Phase 2 migrations 0001/0002 to the real, already-populated production D1 database (to bring
+Gmail polling live) failed: `wrangler d1 migrations apply --remote` sends a migration file's statements
+as one atomic D1 batch, and `PRAGMA foreign_keys=OFF` is a documented SQLite no-op once a transaction is
+already open — confirmed empirically (a `PRAGMA foreign_keys=OFF` set via one `wrangler d1 execute
+--remote` call had zero effect when queried back in a separate call: D1 does not keep a connection alive
+across requests the way a persistent PRAGMA setting would need). This means the migration's `DROP TABLE
+storefronts`/`DROP TABLE suppliers` (drizzle-kit's required strategy for their CHECK-constraint changes)
+genuinely violates real foreign keys from `orders.storefront_id`/`fulfillments.supplier_id`, which have
+real rows in production. Reproduced and confirmed locally via a Python `sqlite3` harness that seeds
+Phase-1-shaped referencing data and applies the migration inside one transaction (matching D1's real
+batching behavior) before touching anything live.
+
+- **The migration files themselves (`0001_overjoyed_kree.sql`, `0002_sticky_warpath.sql`) were left
+  byte-identical, uncommitted-to change.** They remain fully correct for their normal use case — a fresh
+  database (every test run, local dev, and any future from-scratch deployment) has zero rows in any
+  table, so the same `DROP TABLE` cannot violate any FK regardless of whether `PRAGMA foreign_keys=OFF`
+  actually takes effect. Editing the committed files to work around the live-data case would have
+  silently weakened the schema (dropped the `platform` CHECK) for every test and fresh install too —
+  the wrong trade-off for a problem that is specific to one already-populated remote database.
+- **Applied an FK-safe subset by hand instead**, covering everything that doesn't require dropping a
+  referenced table: the six new tables verbatim (empty tables, no FK risk), and — critically — realized
+  mid-fix that `suppliers`' new columns (`kind`, `provider`, etc.) and `storefronts`' new nullable OAuth
+  columns don't actually need the drop-rebuild dance at all: they're brand-new columns, and modern
+  SQLite (verified on 3.45, D1 confirmed compatible) supports `ALTER TABLE ADD COLUMN col ... CHECK(...)`
+  in place, with zero rebuild and zero FK exposure. Migration 0002 (Gmail's four `users` columns) was
+  always FK-safe on its own. Validated the exact hand-built statement list against the same local
+  FK-referencing-data harness before running it against the real database, then executed it via
+  `wrangler d1 execute --remote --file=...` and manually inserted rows into `d1_migrations` for both
+  filenames so `wrangler d1 migrations apply` correctly reports "no migrations to apply" going forward
+  and never attempts to re-run the (unsafe-for-this-database) original file.
+- **The one piece deliberately left undone: `storefronts.platform`'s CHECK constraint still only allows
+  `('shopify')` on the real remote database**, not `('shopify', 'ebay', 'amazon')` as `schema.ts` and the
+  committed migration describe. Widening it safely requires rebuilding `storefronts` under FK
+  enforcement, which — because `orders` (its child) also has real rows referencing it, and
+  `order_line_items`/`fulfillments` (orders' children) do too, and `fulfillment_line_items`/`disputes`
+  (fulfillments' children) do too — cascades into needing a coordinated rebuild of up to seven real,
+  data-bearing tables in the correct dependency order within one atomic D1 batch. That is real,
+  invasive, easy-to-get-wrong surgery on production data that was not justified today: no eBay/Amazon
+  storefront row exists yet to need it (eBay's developer account is still pending review). **This is a
+  real, tracked blocker, not a resolved one**: attempting `INSERT INTO storefronts (..., platform,
+  ...) VALUES (..., 'ebay', ...)` against the real database today will fail with a CHECK constraint
+  violation. Before the eBay (or Amazon) storefront row is ever inserted for real, this must be solved —
+  either the full cascading rebuild (planned, careful, ideally during a low-traffic window with a fresh
+  `PRAGMA foreign_key_check` verification step at the end), or a deliberate decision to drop the
+  DB-level CHECK entirely and rely on TypeScript's `text({enum:[...]})` compile-time enforcement alone
+  (the application code path has never once constructed an insert with an invalid platform value, and
+  never will, since the enum is exhaustively typed). Flagged loudly in DEPLOY.md's eBay section (8) so
+  this isn't rediscovered the hard way mid-setup.
+- **Deliberately did not edit `packages/db/migrations/meta/0001_snapshot.json`.** The snapshot describes
+  drizzle-kit's understanding of the schema a *committed migration file* produces, which is still
+  accurate — the file itself does correctly widen the CHECK when run against a fresh database. The
+  divergence lives only in one already-deployed remote database's actual current state, which is an
+  operational fact belonging in DECISIONS.md/DEPLOY.md, not in drizzle-kit's migration-generation
+  bookkeeping. A future migration to actually complete the cascading rebuild will need to be hand-written
+  (not `drizzle-kit generate`d, since `schema.ts` hasn't changed and drizzle-kit would see no diff to
+  generate against) — noted here so that's not a surprise later.

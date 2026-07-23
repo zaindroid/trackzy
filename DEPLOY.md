@@ -132,6 +132,19 @@ these steps — none of it is required for `pnpm dev` / `pnpm test`.
 
 ## 8. eBay (Sell APIs: Fulfillment, Inventory, Post-Order) + non-API fallback
 
+**⚠️ BLOCKER — read before inserting a real eBay `storefronts` row**: on the real production database
+(as of the Gmail-integration deployment), `storefronts.platform`'s CHECK constraint still only allows
+`'shopify'` — it was **not** widened to include `'ebay'`/`'amazon'` when the rest of Phase 2's schema was
+retrofitted onto the live, already-populated database, because doing so safely requires a coordinated
+rebuild of `storefronts` and every table transitively chained to it via foreign keys (`orders` →
+`order_line_items`/`fulfillments` → `fulfillment_line_items`/`disputes`), all of which have real data.
+See DECISIONS.md's "Phase 2 remote migration retrofit" entry for the full reasoning. **Attempting to
+insert an eBay storefront row today will fail with a CHECK constraint violation.** Before step 4 below,
+this needs to be resolved — either by carefully performing that cascading rebuild (plan it out, verify
+with `PRAGMA foreign_key_check` afterward) or by deciding to drop the DB-level CHECK on `platform`
+entirely and rely on TypeScript's compile-time enum enforcement alone. Flag this to whoever's doing the
+setup so it isn't rediscovered mid-flow.
+
 **TODO(HUMAN)**: Register at the [eBay Developers Program](https://developer.ebay.com/), then:
 1. Create a **Keyset** (Production, once you're past sandbox testing) — this gives you
    `EBAY_CLIENT_ID` (App ID) and `EBAY_CLIENT_SECRET` (Cert ID).
@@ -163,6 +176,10 @@ account, leave `non_api_mode = 1`. `pushTracking` will throw `NonApiModeError` (
 below) to paste into eBay's own "Add tracking" page by hand.
 
 ## 9. Amazon SP-API (orders, RDT-gated address access, feeds, listings)
+
+**⚠️ Same blocker as eBay's section 8 applies here** — a real `storefronts` row with `platform='amazon'`
+will also be rejected by the production database's CHECK constraint until that's resolved. See section
+8's warning and DECISIONS.md's "Phase 2 remote migration retrofit" entry.
 
 **TODO(HUMAN)**: Register as a [Selling Partner API developer](https://developer.amazonservices.com/)
 and create a **self-authorized private application** (the correct shape for a single seller
