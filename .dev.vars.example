@@ -69,6 +69,11 @@ ALIEXPRESS_OAUTH_REFRESH_TOKEN=PLACEHOLDER__ALIEXPRESS_OAUTH_REFRESH_TOKEN
 # Optional override; defaults to https://api-sg.aliexpress.com/rest (the
 # separate REST auth-token gateway — different base path than ALIEXPRESS_GATEWAY_URL)
 # ALIEXPRESS_REST_BASE_URL=
+# Market context ds.* methods require (confirmed live — see real.ts). Defaults shown are the fallbacks already baked into the adapter.
+# ALIEXPRESS_DEFAULT_COUNTRY_CODE=US
+# ALIEXPRESS_DEFAULT_CURRENCY=USD
+# ALIEXPRESS_DEFAULT_LOCALE=en_US
+# ALIEXPRESS_DEFAULT_LANGUAGE=en
 # Optional override; defaults to https://api-sg.aliexpress.com/sync
 # ALIEXPRESS_GATEWAY_URL=
 

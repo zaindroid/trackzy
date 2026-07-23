@@ -974,3 +974,37 @@ this guess was wrong in two ways at once, discovered by trial against the real A
   matches reality; added a second case asserting the client surfaces AliExpress's own `code`/`message`
   when a refresh call itself reports failure (e.g. an actually-expired refresh token), so that failure
   mode reads as "AliExpress rejected this" rather than a generic parse error.
+
+## Post-milestone-10 — searchProduct/getOffer corrected against real ds.* responses
+
+With a live session token in hand (the tokens above), made real `aliexpress.ds.text.search` and
+`aliexpress.ds.product.get` calls to confirm the business-method shapes those two methods were also
+guessing at. Both guesses were wrong, in ways only a real response could have caught:
+- **Three required params were missing entirely** — `countryCode`, `currency`, `local` for
+  `aliexpress.ds.text.search` (each surfaced its own `MissingParameter` error in turn as they were added
+  one at a time) and `ship_to_country`/`target_currency`/`target_language` for
+  `aliexpress.ds.product.get`. All default to a US/USD/English market, overridable via new
+  `ALIEXPRESS_DEFAULT_*` env vars, since a dropshipping catalog can legitimately vary by target market —
+  `TODO(HUMAN)`: make these per-listing/storefront if that turns out to matter.
+- **Every `ds.*` response envelope is prefixed `aliexpress_ds_..._response`**, not `ds_..._response` as
+  originally guessed for all four methods — confirmed on the two methods actually called live
+  (`aliexpress_ds_text_search_response`, `aliexpress_ds_product_get_response`); applied the same
+  correction to `createOrder`/`getTracking`'s envelope names on the strength of this now-consistent
+  pattern, while leaving their *inner* result field names flagged `TODO(HUMAN)` unverified — those two
+  calls place/query a real, billable order, which wasn't something to exercise just to verify a field
+  name during setup.
+- **`searchProduct`'s real results nest under `data.products.selection_search_product`**, not
+  `data.products` directly, and use `itemId`/`title` (not `product_id`/`subject`) — the original field
+  names were a plausible guess based on common TOP-family naming, but wrong for this specific method.
+- **`getOffer`'s real price/stock live per-SKU** (`ae_item_sku_info_dtos.ae_item_sku_info_d_t_o[]`, an
+  array — a product can have several SKUs for color/size variants), not on `ae_item_base_info_dto` as
+  guessed; that field doesn't carry a price at all in the real response. Since `SupplierOffer` needs a
+  single cost/stock summary, `getOffer` now picks the **cheapest** SKU's price as the returned
+  `costCents` and reports `inStock: true` if *any* SKU has `sku_available_stock > 0` — a reasonable,
+  documented aggregation choice rather than an arbitrary "first SKU wins," which would have silently
+  picked whichever variant happens to sort first. `logistics_info_dto.delivery_time` for `shipDays`
+  matched the original guess exactly (a number of days, not the string originally typed).
+- New tests in `real.test.ts` assert the exact real-shaped parsing (cheapest-SKU selection, any-SKU-
+  in-stock, the three now-required search params actually being sent, and a graceful empty array when
+  `selection_search_product` is absent — a real shape for a zero-result search, confirmed live for a
+  nonsense query).

@@ -119,40 +119,75 @@ export class RealAliExpressClient implements SupplierApiClient {
   }
 
   async searchProduct(query: string): Promise<SupplierProduct[]> {
-    const data = await this.call<{ ds_text_search_response: { data: { products: { product_id: string; subject: string }[] } } }>(
-      'aliexpress.ds.text.search',
-      { text: query, page_size: '10' },
-    );
-    return data.ds_text_search_response.data.products.map((p) => ({ supplierProductId: p.product_id, title: p.subject }));
+    // countryCode/currency/local are genuinely required — confirmed against
+    // a live account, each surfacing its own MissingParameter error in turn
+    // until all three were supplied. Response envelope is
+    // `aliexpress_ds_text_search_response` (the `aliexpress_` prefix on
+    // every ds.* response, not just `ds_..._response` as first guessed —
+    // also confirmed live), with results nested under
+    // `data.products.selection_search_product`, not `data.products`
+    // directly. TODO(HUMAN): make country/currency/locale configurable
+    // per-listing/storefront if you dropship to multiple markets with
+    // materially different catalogs/pricing.
+    const data = await this.call<{
+      aliexpress_ds_text_search_response: {
+        data: { products: { selection_search_product?: { itemId: string; title: string }[] } };
+      };
+    }>('aliexpress.ds.text.search', {
+      text: query,
+      page_size: '10',
+      countryCode: this.env.ALIEXPRESS_DEFAULT_COUNTRY_CODE ?? 'US',
+      currency: this.env.ALIEXPRESS_DEFAULT_CURRENCY ?? 'USD',
+      local: this.env.ALIEXPRESS_DEFAULT_LOCALE ?? 'en_US',
+    });
+    const products = data.aliexpress_ds_text_search_response.data.products.selection_search_product ?? [];
+    return products.map((p) => ({ supplierProductId: p.itemId, title: p.title }));
   }
 
   async getOffer(supplierProductId: string): Promise<SupplierOffer> {
+    // Confirmed live: price/stock live per-SKU (a product can have several —
+    // color/size variants), not on ae_item_base_info_dto as first guessed;
+    // this picks the cheapest in-stock SKU as "the" offer. Response envelope
+    // is `aliexpress_ds_product_get_response` (same prefix correction as
+    // searchProduct above); logistics_info_dto.delivery_time matched the
+    // original guess.
     const data = await this.call<{
-      ds_product_get_response: {
+      aliexpress_ds_product_get_response: {
         result: {
-          ae_item_base_info_dto: { sale_price: string };
-          ae_item_sku_info_dtos?: { sku_stock: boolean }[];
-          logistics_info_dto?: { delivery_time?: string };
+          ae_item_sku_info_dtos?: { ae_item_sku_info_d_t_o?: { sku_price: string; sku_available_stock: number }[] };
+          logistics_info_dto?: { delivery_time?: number };
         };
       };
-    }>('aliexpress.ds.product.get', { product_id: supplierProductId });
+    }>('aliexpress.ds.product.get', {
+      product_id: supplierProductId,
+      ship_to_country: this.env.ALIEXPRESS_DEFAULT_COUNTRY_CODE ?? 'US',
+      target_currency: this.env.ALIEXPRESS_DEFAULT_CURRENCY ?? 'USD',
+      target_language: this.env.ALIEXPRESS_DEFAULT_LANGUAGE ?? 'en',
+    });
 
-    const result = data.ds_product_get_response.result;
-    const inStock = result.ae_item_sku_info_dtos?.some((sku) => sku.sku_stock) ?? true;
-    const shipDays = result.logistics_info_dto?.delivery_time
-      ? Number.parseFloat(result.logistics_info_dto.delivery_time)
-      : undefined;
+    const result = data.aliexpress_ds_product_get_response.result;
+    const skus = result.ae_item_sku_info_dtos?.ae_item_sku_info_d_t_o ?? [];
+    const inStock = skus.some((sku) => sku.sku_available_stock > 0);
+    const cheapest = skus.reduce<number | undefined>((min, sku) => {
+      const price = Number.parseFloat(sku.sku_price);
+      return min === undefined || price < min ? price : min;
+    }, undefined);
 
     return {
-      costCents: Math.round(Number.parseFloat(result.ae_item_base_info_dto.sale_price) * 100),
+      costCents: cheapest !== undefined ? Math.round(cheapest * 100) : 0,
       shippingCents: 0, // resolved separately via aliexpress.logistics.buyer.freight.calculate when needed
       inStock,
-      shipDays,
+      shipDays: result.logistics_info_dto?.delivery_time,
     };
   }
 
   async createOrder(input: CreateSupplierApiOrderInput): Promise<CreateSupplierApiOrderResult> {
-    const data = await this.call<{ ds_order_create_response: { result: { order_id: string } } }>(
+    // TODO(HUMAN): unlike searchProduct/getOffer above, this call was never
+    // exercised live (it places a real, billable order) — only the
+    // `aliexpress_` response-envelope prefix correction (confirmed
+    // consistent across every ds.* method actually tested) was applied here;
+    // the field names within `result` are still an unverified guess.
+    const data = await this.call<{ aliexpress_ds_order_create_response: { result: { order_id: string } } }>(
       'aliexpress.ds.order.create',
       {
         product_items: JSON.stringify([{ product_id: input.supplierProductId, product_count: input.quantity }]),
@@ -167,17 +202,19 @@ export class RealAliExpressClient implements SupplierApiClient {
         }),
       },
     );
-    return { supplierOrderRef: data.ds_order_create_response.result.order_id };
+    return { supplierOrderRef: data.aliexpress_ds_order_create_response.result.order_id };
   }
 
   async getTracking(supplierOrderRef: string): Promise<SupplierTrackingResult> {
+    // TODO(HUMAN): same caveat as createOrder above — envelope prefix fixed
+    // by the now-confirmed convention, but the inner field names are unverified.
     const data = await this.call<{
-      ds_trade_order_get_response: {
+      aliexpress_ds_trade_order_get_response: {
         result: { logistics_status?: string; logistics_no?: string; logistics_company?: string };
       };
     }>('aliexpress.ds.trade.order.get', { order_id: supplierOrderRef });
 
-    const result = data.ds_trade_order_get_response.result;
+    const result = data.aliexpress_ds_trade_order_get_response.result;
     return {
       trackingNumber: result.logistics_no ?? null,
       carrier: result.logistics_company ?? null,

@@ -15,7 +15,7 @@ describe('RealAliExpressClient — session param', () => {
       'fetch',
       vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
         capturedBody = new URLSearchParams(init?.body as string);
-        return jsonResponse({ ds_text_search_response: { data: { products: [] } } });
+        return jsonResponse({ aliexpress_ds_text_search_response: { data: { products: {} } } });
       }),
     );
 
@@ -45,7 +45,7 @@ describe('RealAliExpressClient — token refresh', () => {
           return jsonResponse({ access_token: 'fresh-session', refresh_token: 'fresh-refresh', expire_time: freshExpiry, code: '0' });
         }
         searchBody = new URLSearchParams(init?.body as string);
-        return jsonResponse({ ds_text_search_response: { data: { products: [] } } });
+        return jsonResponse({ aliexpress_ds_text_search_response: { data: { products: {} } } });
       }),
     );
 
@@ -77,6 +77,91 @@ describe('RealAliExpressClient — token refresh', () => {
 
     const client = new RealAliExpressClient(ENV, EXPIRED_TOKENS, async () => undefined);
     await expect(client.searchProduct('widget')).rejects.toThrow(/InvalidRefreshToken/);
+    vi.unstubAllGlobals();
+  });
+});
+
+const FRESH_TOKENS: AliExpressTokenSet = { accessToken: 'session-token', refreshToken: 'refresh-1', expiresAt: Date.now() + 3600_000 };
+
+describe('RealAliExpressClient — searchProduct (real response shape, confirmed live)', () => {
+  it('sends the required countryCode/currency/local params and parses selection_search_product into SupplierProduct[]', async () => {
+    let capturedBody: URLSearchParams | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        capturedBody = new URLSearchParams(init?.body as string);
+        return jsonResponse({
+          aliexpress_ds_text_search_response: {
+            data: { products: { selection_search_product: [{ itemId: '1005007498036927', title: 'Widget' }] } },
+          },
+        });
+      }),
+    );
+
+    const client = new RealAliExpressClient(ENV, FRESH_TOKENS, async () => undefined);
+    const results = await client.searchProduct('widget');
+
+    expect(capturedBody?.get('countryCode')).toBe('US');
+    expect(capturedBody?.get('currency')).toBe('USD');
+    expect(capturedBody?.get('local')).toBe('en_US');
+    expect(results).toEqual([{ supplierProductId: '1005007498036927', title: 'Widget' }]);
+    vi.unstubAllGlobals();
+  });
+
+  it('returns an empty array (not a crash) when selection_search_product is absent — a real zero-result response', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ aliexpress_ds_text_search_response: { data: { products: {} } } })));
+    const client = new RealAliExpressClient(ENV, FRESH_TOKENS, async () => undefined);
+    await expect(client.searchProduct('nonexistent')).resolves.toEqual([]);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('RealAliExpressClient — getOffer (real response shape, confirmed live)', () => {
+  it('picks the cheapest in-stock SKU as the offer price, and reports inStock when any SKU has stock', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse({
+          aliexpress_ds_product_get_response: {
+            result: {
+              ae_item_sku_info_dtos: {
+                ae_item_sku_info_d_t_o: [
+                  { sku_price: '39.98', sku_available_stock: 11 },
+                  { sku_price: '29.98', sku_available_stock: 13 },
+                  { sku_price: '35.98', sku_available_stock: 0 },
+                ],
+              },
+              logistics_info_dto: { delivery_time: 7 },
+            },
+          },
+        }),
+      ),
+    );
+
+    const client = new RealAliExpressClient(ENV, FRESH_TOKENS, async () => undefined);
+    const offer = await client.getOffer('1005007498036927');
+
+    expect(offer.costCents).toBe(2998); // the cheapest SKU, not the first one
+    expect(offer.inStock).toBe(true);
+    expect(offer.shipDays).toBe(7);
+    vi.unstubAllGlobals();
+  });
+
+  it('reports inStock=false when every SKU is out of stock', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse({
+          aliexpress_ds_product_get_response: {
+            result: { ae_item_sku_info_dtos: { ae_item_sku_info_d_t_o: [{ sku_price: '10.00', sku_available_stock: 0 }] } },
+          },
+        }),
+      ),
+    );
+
+    const client = new RealAliExpressClient(ENV, FRESH_TOKENS, async () => undefined);
+    const offer = await client.getOffer('some-id');
+    expect(offer.inStock).toBe(false);
     vi.unstubAllGlobals();
   });
 });

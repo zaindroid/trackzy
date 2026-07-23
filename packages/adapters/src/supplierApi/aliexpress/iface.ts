@@ -6,6 +6,11 @@ export interface AliExpressEnv {
   ALIEXPRESS_GATEWAY_URL?: string;
   /** Base URL for the separate `/rest/auth/token/*` OAuth endpoints — see real.ts's docstring. */
   ALIEXPRESS_REST_BASE_URL?: string;
+  // Market context params ds.* methods require — confirmed live, see real.ts.
+  ALIEXPRESS_DEFAULT_COUNTRY_CODE?: string; // e.g. 'US'
+  ALIEXPRESS_DEFAULT_CURRENCY?: string; // e.g. 'USD'
+  ALIEXPRESS_DEFAULT_LOCALE?: string; // e.g. 'en_US' (aliexpress.ds.text.search's `local` param)
+  ALIEXPRESS_DEFAULT_LANGUAGE?: string; // e.g. 'en' (aliexpress.ds.product.get's `target_language` param)
 }
 
 /**
