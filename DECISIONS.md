@@ -776,3 +776,37 @@ before each `phase2(N)` commit.
   Phase 1 established — so `MOCK_MODE`'s own placeholder-detection continues to correctly identify
   every Phase 2 adapter as unconfigured out of the box, with no separate mock-detection logic needed
   for the new variables.
+
+## Post-milestone-10 — OAuth access-token refresh persistence bug (found while going live with Gmail)
+
+While walking the user through connecting a real Gmail inbox (first real Phase 2 credential wired up,
+post-build), traced through what actually happens ~55 minutes after the first poll and found a real,
+previously-untested bug: `gmailIngestion.ts`'s `onTokenRefreshed` callback (and the identical pattern
+in `orderSourceForStorefront.ts` for eBay/Amazon) only persisted the refreshed token's `expiresAt`,
+not the refreshed `accessToken` itself. Since the *token value* is resolved fresh on every invocation
+from a `*_ref` column pointing at a static `env:GMAIL_OAUTH_ACCESS_TOKEN` secret (which never changes
+after `wrangler secret put`), persisting only the expiry meant: after the first automatic refresh, the
+DB would correctly say "not expiring soon" while actually still resolving to the *original*,
+by-then-genuinely-expired access token — every poll after that point would silently fail with a 401
+and never recover, since the stored expiry would never again look stale enough to trigger a real
+refresh. This had zero test coverage before now: `RealGmailClient`'s refresh path is only reachable
+through the *Real* adapter class, and every worker-level test runs in `MOCK_MODE` (`MockGmailClient`
+has no refresh logic at all), so the bug was invisible to `pnpm test` despite being fully deterministic
+and would have reproduced on literally every real deployment within about an hour of the first poll.
+- **Fix: persist the refreshed access token as a literal value into the same `*_ref` column**, not a
+  separate raw-token column — `resolveSecretRef` already documents and implements exactly this
+  fallback (a ref either starts with `env:` and is resolved, or is returned as-is), so no schema change
+  was needed, just actually using the escape hatch that was already designed in. Applied identically to
+  `gmailIngestion.ts` (`users.gmailAccessTokenRef`) and `orderSourceForStorefront.ts`
+  (`storefronts.oauthAccessTokenRef`) — the latter isn't live yet (eBay pending developer-account
+  review, Amazon not started at time of writing) but carries the exact same bug and would have failed
+  identically the first time either went live, so it was fixed now rather than deferred.
+- **Added a real regression test** (`packages/adapters/src/gmail/real.test.ts`) at the one layer that
+  can actually exercise this: constructs a `RealGmailClient` with an already-expired token, asserts the
+  subsequent API call carries the newly-refreshed bearer token (not the stale one), and asserts
+  `onTokenRefreshed`'s argument itself carries the real new `accessToken` value distinct from the
+  original — directly guarding against silently regressing back to "only the timestamp is persisted."
+  No equivalent worker-level test was added for `orderSourceForStorefront.ts`'s callback specifically,
+  since MOCK_MODE makes that code path unreachable in every existing worker test the same way it does
+  for Gmail — the adapter-level test plus identical code-review of the (structurally identical) second
+  call site was judged sufficient given neither eBay nor Amazon is live yet.

@@ -74,3 +74,39 @@ describe('RealGmailClient — message body decoding', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('RealGmailClient — token refresh', () => {
+  it('refreshes an expired access token before the request, and reports the new token (not just its expiry) via onTokenRefreshed', async () => {
+    const EXPIRED_TOKENS = { accessToken: 'stale-access-token', refreshToken: 'refresh-1', expiresAt: Date.now() - 1000 };
+    const calls: { url: string; authHeader: string | null }[] = [];
+    let refreshedArg: { accessToken: string; refreshToken: string; expiresAt: number } | undefined;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === 'https://oauth2.googleapis.com/token') {
+          return jsonResponse({ access_token: 'fresh-access-token', expires_in: 3599 });
+        }
+        const authHeader = (init?.headers as Record<string, string> | undefined)?.Authorization ?? null;
+        calls.push({ url, authHeader });
+        return jsonResponse({ messages: [] });
+      }),
+    );
+
+    const client = new RealGmailClient({ GMAIL_CLIENT_ID: 'client-1', GMAIL_CLIENT_SECRET: 'secret-1' }, EXPIRED_TOKENS, async (refreshed) => {
+      refreshedArg = refreshed;
+    });
+    await client.listNewMessages('subject:shipped', 0);
+
+    // The actual API request used the newly-refreshed token, not the stale one passed in.
+    expect(calls[0]?.authHeader).toBe('Bearer fresh-access-token');
+    // onTokenRefreshed carries the real token value — a caller that only persists
+    // `expiresAt` (the bug this test guards against) would silently keep serving
+    // the stale token on every subsequent invocation. See DECISIONS.md.
+    expect(refreshedArg?.accessToken).toBe('fresh-access-token');
+    expect(refreshedArg?.accessToken).not.toBe(EXPIRED_TOKENS.accessToken);
+    expect(refreshedArg?.expiresAt).toBeGreaterThan(Date.now());
+    vi.unstubAllGlobals();
+  });
+});

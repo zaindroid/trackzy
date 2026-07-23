@@ -9,11 +9,11 @@ import { resolveSecretRef } from './secretRef.js';
 /**
  * Resolves the right `OrderSource` for a storefront (eBay or Amazon —
  * Shopify is intentionally excluded, see DECISIONS.md milestone 2), wiring
- * up its OAuth tokens and a refresh callback that persists a renewed
- * `oauthExpiresAt` back onto the `storefronts` row. Shared by the repricing
- * sweep and, from milestone 9, the messaging engine — both need "give me a
- * live OrderSource for this storefront" and neither should re-derive the
- * OAuth plumbing independently.
+ * up its OAuth tokens and a refresh callback that persists a renewed access
+ * token and expiry back onto the `storefronts` row. Shared by the repricing
+ * sweep and the messaging engine — both need "give me a live OrderSource for
+ * this storefront" and neither should re-derive the OAuth plumbing
+ * independently.
  */
 export async function createOrderSourceForStorefront(
   env: Env,
@@ -29,8 +29,16 @@ export async function createOrderSourceForStorefront(
     refreshToken: resolveSecretRef(storefront.oauthRefreshTokenRef, env),
     expiresAt: storefront.oauthExpiresAt ?? 0,
   };
-  const onTokenRefreshed = async (refreshed: { expiresAt: number }) => {
-    await db.update(storefronts).set({ oauthExpiresAt: refreshed.expiresAt }).where(eq(storefronts.id, storefront.id));
+  const onTokenRefreshed = async (refreshed: { accessToken: string; expiresAt: number }) => {
+    // Persist the refreshed access token itself, not just its expiry — see
+    // the identical fix (and full reasoning) in gmailIngestion.ts and
+    // DECISIONS.md. A static `env:` pointer never changes, so a renewed
+    // expiry alone would make the next request trust a token that was never
+    // actually saved.
+    await db
+      .update(storefronts)
+      .set({ oauthAccessTokenRef: refreshed.accessToken, oauthExpiresAt: refreshed.expiresAt })
+      .where(eq(storefronts.id, storefront.id));
   };
 
   if (storefront.platform === 'ebay') {

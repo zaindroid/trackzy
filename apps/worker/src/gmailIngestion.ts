@@ -41,12 +41,20 @@ export async function pollGmailForUser(env: Env, userId: string): Promise<void> 
   };
 
   const gmail = createGmailClient(env, tokens, async (refreshed) => {
-    // Only the expiry timestamp is persisted directly — the refreshed token
-    // *values* live wherever the ref points (an env var / secret store in
-    // this single-tenant demo), matching every other `*_ref` convention in
-    // this schema. See DECISIONS.md.
-    void refreshed;
-    await db.update(users).set({ gmailTokenExpiresAt: refreshed.expiresAt }).where(eq(users.id, userId));
+    // The refreshed access token is written back as a literal value (not an
+    // `env:VAR_NAME` pointer) into the same `*_ref` column — `resolveSecretRef`
+    // already supports a ref column holding either a pointer or a raw value.
+    // This is required, not cosmetic: a static `env:GMAIL_OAUTH_ACCESS_TOKEN`
+    // secret never changes, but the *initial* access token it points at is
+    // only valid for ~1 hour. Persisting only `gmailTokenExpiresAt` (as this
+    // used to do) would make the next poll trust a stale/expired token as
+    // "still fresh" — the timestamp would correctly describe the just-issued
+    // token, but the column would still resolve to the original static one.
+    // See DECISIONS.md.
+    await db
+      .update(users)
+      .set({ gmailAccessTokenRef: refreshed.accessToken, gmailTokenExpiresAt: refreshed.expiresAt })
+      .where(eq(users.id, userId));
   });
 
   const since = user.gmailLastPolledAt ?? 0;
