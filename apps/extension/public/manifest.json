@@ -14,11 +14,12 @@
   "host_permissions": [
     "https://fulfillment-tracker.zainey4-26a.workers.dev/*",
     "https://www.amazon.com/*",
+    "https://www.amazon.de/*",
     "https://www.ebay.com/*"
   ],
   "content_scripts": [
     {
-      "matches": ["https://www.amazon.com/*"],
+      "matches": ["https://www.amazon.com/*", "https://www.amazon.de/*"],
       "js": ["content-checkout.js"],
       "run_at": "document_idle"
     },
