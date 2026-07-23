@@ -10,7 +10,7 @@ export { MockAliExpressClient } from './mock.js';
 export { signAliExpressParams } from './sign.js';
 
 export function createAliExpressClient(env: AliExpressEnv): SupplierApiClient {
-  if (isMockMode(env.MOCK_MODE, env.ALIEXPRESS_APP_KEY, env.ALIEXPRESS_APP_SECRET)) {
+  if (isMockMode(env.MOCK_MODE, env.ALIEXPRESS_APP_KEY, env.ALIEXPRESS_APP_SECRET, env.ALIEXPRESS_ACCESS_TOKEN)) {
     return new MockAliExpressClient();
   }
   return new RealAliExpressClient(env);

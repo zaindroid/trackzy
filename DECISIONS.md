@@ -869,3 +869,35 @@ batching behavior) before touching anything live.
   bookkeeping. A future migration to actually complete the cascading rebuild will need to be hand-written
   (not `drizzle-kit generate`d, since `schema.ts` hasn't changed and drizzle-kit would see no diff to
   generate against) — noted here so that's not a surprise later.
+
+## Post-milestone-10 — AliExpress adapter missing `session` (real functional gap, found before real setup)
+
+While preparing to walk the user through connecting AliExpress as a real supplier, re-reading
+`RealAliExpressClient` against how TOP-style (Taobao Open Platform-family) APIs actually authenticate
+surfaced a genuine gap, not just a documentation caveat: every request was signed with `app_key`/
+`app_secret` only. Those identify *the app*, not *which AliExpress dropshipping account* a call acts on
+behalf of — account-scoped Dropshipping API methods (`aliexpress.ds.order.create`,
+`aliexpress.ds.trade.order.get`) require a `session` system parameter (an OAuth access token) the
+adapter never sent at all. This would have meant real order placement silently failing (or worse,
+acting on the wrong/no account) the first time this adapter was actually exercised against a live app —
+exactly the kind of gap that's invisible in MOCK_MODE (the mock never touches the real signing/request
+path) and wouldn't have surfaced until a real integration attempt.
+- **Added `ALIEXPRESS_ACCESS_TOKEN` as a static, pre-obtained secret** (not a full OAuth token-set +
+  refresh-callback like eBay/Amazon/Gmail) — included as the `session` param only when set (an empty
+  `session=` would be worse than omitting it, since some TOP implementations distinguish "no session
+  provided" from "empty session"). This mirrors CJ's existing "acquired once, out-of-band" pattern
+  rather than building a new OAuth-refresh subsystem into `SupplierApiClient` speculatively — AliExpress
+  Dropshipping API session-token lifetimes aren't verifiable without a live app, so building automatic
+  refresh now would be guessing at a token-expiry contract that might turn out wrong. Flagged as a
+  `TODO(HUMAN)` in both the code and DEPLOY.md: if the real token turns out to be short-lived enough
+  that manual renewal is impractical, extend this to the same pattern the other three OAuth-backed
+  adapters already use.
+- **`createAliExpressClient`'s mock-mode gate now also checks `ALIEXPRESS_ACCESS_TOKEN`** — previously
+  only `ALIEXPRESS_APP_KEY`/`ALIEXPRESS_APP_SECRET` gated real-vs-mock, meaning a deployment with only
+  those two set (and no session token) would have routed to the *real* client and made genuinely broken
+  account-scoped calls instead of falling back to the mock. Now all three must be real, non-placeholder
+  values before the real client is used.
+- **New test** (`packages/adapters/src/supplierApi/aliexpress/real.test.ts`, not previously covered by
+  any test) asserts `session` is present in the signed request body when the token is set, and — equally
+  important — *absent* (not an empty string) when it isn't, directly guarding the fix against a silent
+  regression back to "always send session, even blank."

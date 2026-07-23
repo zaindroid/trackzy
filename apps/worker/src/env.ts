@@ -42,6 +42,7 @@ export interface Env {
   AMAZON_BUSINESS_BASE_URL?: string;
   ALIEXPRESS_APP_KEY?: string;
   ALIEXPRESS_APP_SECRET?: string;
+  ALIEXPRESS_ACCESS_TOKEN?: string;
   ALIEXPRESS_GATEWAY_URL?: string;
   CJ_API_KEY?: string;
   CJ_BASE_URL?: string;

@@ -58,6 +58,11 @@ AMAZON_BUSINESS_API_KEY=PLACEHOLDER__AMAZON_BUSINESS_API_KEY
 # --- AliExpress Open Platform (TOP-style HMAC-signed gateway) ---
 ALIEXPRESS_APP_KEY=PLACEHOLDER__ALIEXPRESS_APP_KEY
 ALIEXPRESS_APP_SECRET=PLACEHOLDER__ALIEXPRESS_APP_SECRET
+# The OAuth access token ("session") for the specific AliExpress dropshipping
+# account these calls act on behalf of — required for account-scoped methods
+# like aliexpress.ds.order.create, not just app_key/app_secret. Pre-obtained,
+# not auto-refreshed (see packages/adapters/src/supplierApi/aliexpress/real.ts).
+ALIEXPRESS_ACCESS_TOKEN=PLACEHOLDER__ALIEXPRESS_ACCESS_TOKEN
 # Optional override; defaults to https://api-sg.aliexpress.com/sync
 # ALIEXPRESS_GATEWAY_URL=
 

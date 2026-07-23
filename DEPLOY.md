@@ -220,11 +220,25 @@ Then insert/update a `suppliers` row with `provider = 'amazon_business'`, `kind 
 ## 11. AliExpress Open Platform
 
 **TODO(HUMAN)**: Register an app at the [AliExpress Open Platform](https://openservice.aliexpress.com/)
-console, get `ALIEXPRESS_APP_KEY` / `ALIEXPRESS_APP_SECRET`, then:
-```
-pnpm --filter @fulfillment-tracker/worker exec wrangler secret put ALIEXPRESS_APP_KEY --config ../../wrangler.toml
-pnpm --filter @fulfillment-tracker/worker exec wrangler secret put ALIEXPRESS_APP_SECRET --config ../../wrangler.toml
-```
+console to get `ALIEXPRESS_APP_KEY` / `ALIEXPRESS_APP_SECRET` — this app-registration step is
+self-serve. **Getting approved for the Dropshipping API (`aliexpress.ds.*` methods) specifically may
+require an additional application/approval step beyond basic app registration** — check the console for
+a "Dropshipping"/"DS" API product and its own access request flow; this project has no way to verify
+that approval process without a live account.
+1. Register the app, get `ALIEXPRESS_APP_KEY` / `ALIEXPRESS_APP_SECRET`.
+2. Run AliExpress's OAuth authorization flow once (as the specific AliExpress account that will
+   actually fulfill dropshipping orders) to obtain `ALIEXPRESS_ACCESS_TOKEN` — this is the `session`
+   system parameter every account-scoped Dropshipping API call requires (e.g. `aliexpress.ds.order.create`);
+   without it, only public/catalog-level calls would work. **TODO(HUMAN)**: confirm the token's actual
+   lifetime once you have one — if it's short-lived, `RealAliExpressClient` currently treats it as a
+   static, manually-renewed secret (like CJ's), not an auto-refreshing OAuth token set like eBay/Amazon/
+   Gmail; extend it to that pattern if manual renewal turns out to be too frequent to be practical.
+3. Set secrets:
+   ```
+   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put ALIEXPRESS_APP_KEY --config ../../wrangler.toml
+   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put ALIEXPRESS_APP_SECRET --config ../../wrangler.toml
+   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put ALIEXPRESS_ACCESS_TOKEN --config ../../wrangler.toml
+   ```
 Every request is signed with `packages/adapters/src/supplierApi/aliexpress/sign.ts` (HMAC-SHA256 over
 sorted, concatenated params) using `ALIEXPRESS_APP_SECRET` — no further manual signing setup needed.
 Insert/update a `suppliers` row with `provider = 'aliexpress'`, `kind = 'api'`.

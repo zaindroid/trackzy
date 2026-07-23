@@ -21,6 +21,18 @@ function newBucket(): TokenBucket {
  * and response field shapes follow AliExpress's published Dropshipping API
  * docs; TODO(HUMAN): verify against a live Open Platform app once
  * registered — see DEPLOY.md.
+ *
+ * `session` (the OAuth access token tied to the specific dropshipping
+ * account these calls act on behalf of) is a required TOP system param for
+ * account-scoped methods like `aliexpress.ds.order.create` — unlike
+ * `app_key`/`app_secret` (this app's own identity), `session` identifies
+ * *whose* dropshipping relationship the call executes under. It's read here
+ * as a static, pre-obtained secret (`ALIEXPRESS_ACCESS_TOKEN`), the same
+ * "acquired once, out-of-band" shape as CJ's `CJ_API_KEY` — not a
+ * self-refreshing OAuth token set like eBay/Amazon/Gmail. TODO(HUMAN):
+ * confirm this account's actual token lifetime once registered and, if it's
+ * short-lived enough to need automatic refresh, extend this to the
+ * OAuthTokenSet + refresh-callback pattern those adapters use.
  */
 export class RealAliExpressClient implements SupplierApiClient {
   private readonly bucket = newBucket();
@@ -39,6 +51,7 @@ export class RealAliExpressClient implements SupplierApiClient {
       format: 'json',
       v: '2.0',
       sign_method: 'sha256',
+      ...(this.env.ALIEXPRESS_ACCESS_TOKEN ? { session: this.env.ALIEXPRESS_ACCESS_TOKEN } : {}),
     };
     const allParams = { ...systemParams, ...businessParams };
     const sign = await signAliExpressParams(allParams, this.env.ALIEXPRESS_APP_SECRET ?? '');
