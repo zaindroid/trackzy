@@ -283,6 +283,15 @@ export const listings = sqliteTable(
       .default('active'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
+    // Title optimization (post-build addition — the fifth authorized LLM
+    // call site, see packages/adapters/src/gemini/iface.ts). A suggestion is
+    // generated on demand and reviewed by a human before being applied to
+    // the real marketplace listing; these columns just persist the last
+    // suggestion so the dashboard doesn't need to re-call Gemini on every
+    // page load.
+    suggestedTitle: text('suggested_title'),
+    titleSuggestionReasoning: text('title_suggestion_reasoning'),
+    titleSuggestedAt: integer('title_suggested_at'),
   },
   (t) => ({
     storefrontExternalListingUnique: uniqueIndex('listings_storefront_id_external_listing_id_unique').on(

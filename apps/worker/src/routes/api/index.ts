@@ -9,6 +9,7 @@ import settings from './settings.js';
 import metrics from './metrics.js';
 import manualTasks from './manualTasks.js';
 import extension from './extension.js';
+import listings from './listings.js';
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVariables }>();
 
@@ -24,5 +25,6 @@ app.route('/settings', settings);
 app.route('/metrics', metrics);
 app.route('/manual-tasks', manualTasks);
 app.route('/extension', extension);
+app.route('/listings', listings);
 
 export default app;

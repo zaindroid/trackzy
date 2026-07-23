@@ -1043,3 +1043,44 @@ time catchable against CJ's own published docs rather than trial and error alone
 - New `real.test.ts` (CJ had none before) asserts the corrected search field, cheapest-variant selection,
   and the specific "null inventory is available, zero inventory is not" distinction — directly guarding
   the exact behavior a live account revealed, not a hypothetical.
+
+## Post-milestone-10 — Listing title optimization (5th authorized LLM call site, user-approved)
+
+New feature, not in the original Phase 2 spec — added because Trackerbot (the competitor product this
+project targets feature parity with) has a "Title Optimization" capability the spec never listed. Real
+title/keyword suggestion is a content-generation task an LLM is genuinely well-suited for and a
+deterministic algorithm is not, but the build's hard rule capped Gemini at exactly four call sites. Asked
+the user directly rather than silently deciding either way: expand the hard rule for this one case
+(explicit choice), or keep a lower-quality deterministic-only version. **User chose LLM-powered,
+explicitly authorizing the fifth call site.**
+- **This remains consistent with the *spirit* of the money-path rule even though it breaks the literal
+  "exactly four" count**: `suggestListingTitle` never touches price, margin, stock, or any automated
+  decision — it only ever produces a suggestion a human reviews. The two-step API design
+  (`POST /:id/optimize-title` generates and persists a suggestion; a separate, explicit
+  `POST /:id/apply-title` is required to push it to the real marketplace listing) makes "never
+  auto-applied" a structural property of the route, not just a docstring promise — there is no code path
+  that calls `OrderSource.updateListing({ title })` without a human having first triggered `apply-title`
+  as its own request.
+- **`UpdateListingInput` gained an optional `title` field** — previously only `priceCents`/
+  `quantityAvailable` existed, meaning `OrderSource.updateListing()` had no way to change a title at all
+  even before this feature. Both eBay and Amazon's real adapters were extended to handle it: Amazon's
+  Listings Items API patch-list model absorbed it as one more `/attributes/item_name` patch entry,
+  identical shape to the existing price/quantity patches. eBay is messier and flagged `TODO(HUMAN)`
+  unverified — a listing's title actually lives on eBay's `inventory_item` resource (keyed by SKU), not
+  the `offer` resource this method otherwise updates (keyed by offer/listing id); the implementation
+  assumes `externalListingId` doubles as the SKU, which needs confirming against a live account.
+- **`listings` gained three nullable columns** (`suggested_title`, `title_suggestion_reasoning`,
+  `title_suggested_at`) rather than keeping suggestions stateless/re-generated-on-view — migration 0004,
+  plain `ALTER TABLE ADD COLUMN`, no CHECK/FK involvement, safe to apply directly to the real remote
+  database like migration 0003 was. Persisting means the dashboard can show the last suggestion without
+  re-calling Gemini on every page load, and `apply-title` can validate a suggestion actually exists
+  before pushing anything to the marketplace.
+- **The mock (`MockGeminiExtractor.suggestListingTitle`) is a genuine simplified implementation, not a
+  canned string** — appends any `category`/`keyFeatures` terms not already present in the title
+  (case-insensitive), truncated to the same 80-char budget the real prompt asks for. This means a mock
+  call with no `category`/`keyFeatures` supplied (the route's current call shape — `listings` has no
+  category column yet) legitimately returns the title unchanged, since there's nothing to compare
+  against; a test written against this initially assumed the applied title would always differ from the
+  original and had to be corrected to assert on the actual returned `suggestedTitle` value instead of an
+  "it must have changed" assumption — the real Gemini call doesn't have this limitation, since it reasons
+  over the title text directly rather than a fixed missing-terms list.

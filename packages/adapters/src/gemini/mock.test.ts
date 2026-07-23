@@ -97,4 +97,36 @@ describe('MockGeminiExtractor', () => {
       expect(result).toEqual({ category: 'needs_review', isStuckOrLost: false });
     });
   });
+
+  describe('suggestListingTitle', () => {
+    it('appends missing category/keyFeatures terms not already in the title', async () => {
+      const result = await extractor.suggestListingTitle({
+        currentTitle: 'Phone Case',
+        category: 'Shockproof',
+        keyFeatures: ['MagSafe', 'Clear'],
+      });
+      expect(result.suggestedTitle).toContain('Phone Case');
+      expect(result.suggestedTitle).toContain('Shockproof');
+      expect(result.suggestedTitle).toContain('MagSafe');
+      expect(result.suggestedTitle).toContain('Clear');
+      expect(result.reasoning).toContain('Shockproof');
+    });
+
+    it('does not duplicate a term that already appears in the title (case-insensitive)', async () => {
+      const result = await extractor.suggestListingTitle({
+        currentTitle: 'Clear Phone Case with MagSafe',
+        keyFeatures: ['magsafe', 'Clear'],
+      });
+      expect(result.suggestedTitle).toBe('Clear Phone Case with MagSafe');
+      expect(result.reasoning).toContain('already includes');
+    });
+
+    it('truncates the suggested title to 80 characters', async () => {
+      const result = await extractor.suggestListingTitle({
+        currentTitle: 'A'.repeat(70),
+        keyFeatures: ['Extra Long Feature Name That Pushes This Well Past The Limit'],
+      });
+      expect(result.suggestedTitle.length).toBeLessThanOrEqual(80);
+    });
+  });
 });

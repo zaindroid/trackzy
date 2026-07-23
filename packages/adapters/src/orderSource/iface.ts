@@ -55,6 +55,7 @@ export interface OrderSourceListing {
 export interface UpdateListingInput {
   priceCents?: number;
   quantityAvailable?: number;
+  title?: string;
 }
 
 export interface OrderSource {

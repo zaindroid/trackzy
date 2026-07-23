@@ -8,7 +8,11 @@ import type {
   GeminiExtractor,
   GeminiListingMatchInput,
   GeminiListingMatchResult,
+  GeminiTitleSuggestionInput,
+  GeminiTitleSuggestionResult,
 } from './iface.js';
+
+const TITLE_MAX_LENGTH = 80;
 
 const STUCK_OR_LOST_KEYWORDS = /stuck|lost|missing|returned to sender|damaged|undeliverable|delayed indefinitely/i;
 const IN_TRANSIT_KEYWORDS = /transit|moving|departed|arrived at|out for delivery|customs/i;
@@ -113,5 +117,32 @@ export class MockGeminiExtractor implements GeminiExtractor {
       return { category: 'in_transit', isStuckOrLost: false };
     }
     return { category: 'needs_review', isStuckOrLost: false };
+  }
+
+  /**
+   * Deterministic stand-in: appends any category/keyFeatures not already
+   * present in the title (case-insensitive), truncated to the same 80-char
+   * budget the real prompt asks for — a genuine (if simplistic) improvement
+   * over the original title, not a canned/fixed string, so tests exercise
+   * real "does this actually change the title" behavior.
+   */
+  async suggestListingTitle(input: GeminiTitleSuggestionInput): Promise<GeminiTitleSuggestionResult> {
+    const lowerTitle = input.currentTitle.toLowerCase();
+    const missingTerms = [input.category, ...(input.keyFeatures ?? [])].filter(
+      (term): term is string => !!term && !lowerTitle.includes(term.toLowerCase()),
+    );
+
+    if (missingTerms.length === 0) {
+      return {
+        suggestedTitle: input.currentTitle,
+        reasoning: 'Current title already includes the known category and key features; no change suggested.',
+      };
+    }
+
+    const suggestedTitle = `${input.currentTitle} ${missingTerms.join(' ')}`.trim().slice(0, TITLE_MAX_LENGTH);
+    return {
+      suggestedTitle,
+      reasoning: `Added missing searchable keyword(s) not present in the original title: ${missingTerms.join(', ')}.`,
+    };
   }
 }

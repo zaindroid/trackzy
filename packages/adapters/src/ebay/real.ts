@@ -256,6 +256,19 @@ export class RealEbayOrderSource implements OrderSource {
         body: JSON.stringify({ availableQuantity: input.quantityAvailable }),
       });
     }
+    if (input.title !== undefined) {
+      // TODO(HUMAN): unverified — a listing's title actually lives on eBay's
+      // `inventory_item` resource (keyed by SKU), not the `offer` resource
+      // this method otherwise updates (keyed by offer/listing id). This
+      // assumes `externalListingId` is usable as the inventory_item's SKU
+      // path segment, which needs confirming against a live account; if
+      // they're genuinely different identifiers, this call needs the actual
+      // SKU threaded in from the caller instead.
+      await this.request(`/sell/inventory/v1/inventory_item/${encodeURIComponent(externalListingId)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ product: { title: input.title } }),
+      });
+    }
   }
 
   async pauseListing(externalListingId: string): Promise<void> {

@@ -289,6 +289,17 @@ export class RealAmazonOrderSource implements OrderSource {
         value: [{ quantity: input.quantityAvailable }],
       });
     }
+    if (input.title !== undefined) {
+      // item_name is Amazon's standard Listings Items API attribute for
+      // title; unlike eBay, this stays on the same resource/patch request
+      // as price/quantity. TODO(HUMAN): the exact language-tag wrapper shape
+      // (marketplace_id per entry) is unverified against a live account.
+      patches.push({
+        op: 'replace',
+        path: '/attributes/item_name',
+        value: [{ value: input.title, marketplace_id: this.marketplaceId() }],
+      });
+    }
     if (patches.length === 0) return;
     await this.request(
       `/listings/2021-08-01/items/${this.env.AMAZON_SELLER_ID ?? ''}/${encodeURIComponent(externalListingId)}?marketplaceIds=${this.marketplaceId()}`,

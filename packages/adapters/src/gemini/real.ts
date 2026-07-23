@@ -8,6 +8,8 @@ import type {
   GeminiExtractor,
   GeminiListingMatchInput,
   GeminiListingMatchResult,
+  GeminiTitleSuggestionInput,
+  GeminiTitleSuggestionResult,
 } from './iface.js';
 
 const TRACKING_EXCEPTION_SCHEMA = {
@@ -38,6 +40,15 @@ const DISPUTE_SCHEMA = {
     body: { type: 'string' },
   },
   required: ['subject', 'body'],
+};
+
+const TITLE_SUGGESTION_SCHEMA = {
+  type: 'object',
+  properties: {
+    suggestedTitle: { type: 'string' },
+    reasoning: { type: 'string' },
+  },
+  required: ['suggestedTitle', 'reasoning'],
 };
 
 function listingMatchSchema(candidateIds: string[]) {
@@ -191,5 +202,29 @@ export class RealGeminiExtractor implements GeminiExtractor {
     ].join('\n');
 
     return this.generate<ClassifyTrackingExceptionResult>(prompt, TRACKING_EXCEPTION_SCHEMA);
+  }
+
+  /**
+   * Listing title optimization — the fifth (and, per the hard rule's
+   * original spec, deliberately exceptional) LLM call site, added post-build
+   * at the user's explicit request. Never touches price/margin/stock; the
+   * result is a suggestion a human reviews and chooses to apply via
+   * PATCH /api/listings/:id/apply-title, never auto-applied to a live
+   * marketplace listing straight from this call — see routes/api/listings.ts.
+   */
+  async suggestListingTitle(input: GeminiTitleSuggestionInput): Promise<GeminiTitleSuggestionResult> {
+    const prompt = [
+      'Suggest a better, more search-optimized product listing title for an eBay/Amazon-style marketplace.',
+      `Current title: ${input.currentTitle}`,
+      input.category ? `Category: ${input.category}` : '',
+      input.keyFeatures?.length ? `Key features: ${input.keyFeatures.join(', ')}` : '',
+      'Include concrete, searchable keywords a buyer would actually type (brand, model, size, color,',
+      'material, compatibility) rather than vague marketing language. Keep it under 80 characters.',
+      'Briefly explain why the new title is better.',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    return this.generate<GeminiTitleSuggestionResult>(prompt, TITLE_SUGGESTION_SCHEMA);
   }
 }

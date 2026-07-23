@@ -53,15 +53,30 @@ export interface ClassifyTrackingExceptionResult {
   isStuckOrLost: boolean;
 }
 
+export interface GeminiTitleSuggestionInput {
+  currentTitle: string;
+  category?: string;
+  keyFeatures?: string[];
+}
+
+export interface GeminiTitleSuggestionResult {
+  suggestedTitle: string;
+  reasoning: string;
+}
+
 /**
- * The ONLY four call sites for the LLM anywhere in this codebase (hard
+ * The ONLY five call sites for the LLM anywhere in this codebase (hard
  * architectural rule — never call Gemini from the margin/pricing/repricing/
  * money path): email-extraction fallback, dispute drafting, SKU/listing
  * matching (ambiguous cases only — after exact-SKU, fuzzy-title, and
  * embedding-similarity have all failed to produce an unambiguous match; see
- * packages/core/src/matching.ts), and carrier exception triage (ambiguous
- * cases only — after the deterministic 17TRACK status map in
- * webhooks.tracking.ts has failed to recognize the raw carrier status text).
+ * packages/core/src/matching.ts), carrier exception triage (ambiguous cases
+ * only — after the deterministic 17TRACK status map in webhooks.tracking.ts
+ * has failed to recognize the raw carrier status text), and listing title
+ * optimization (`suggestListingTitle` — the fifth site, added post-build at
+ * the user's explicit request/authorization; see DECISIONS.md. Not a money-
+ * path decision — it never touches price, margin, or stock, only suggests
+ * copy a human reviews before choosing to apply).
  */
 export interface GeminiExtractor {
   extractTracking(input: GeminiExtractInput): Promise<GeminiExtractResult>;
@@ -72,4 +87,6 @@ export interface GeminiExtractor {
   pickBestListingMatch(input: GeminiListingMatchInput): Promise<GeminiListingMatchResult>;
   /** Constrained to the same four-value status vocabulary every deterministic carrier status maps to. */
   classifyTrackingException(rawStatus: string): Promise<ClassifyTrackingExceptionResult>;
+  /** Suggests a marketplace-search-optimized title; never auto-applied — see routes/api/listings.ts. */
+  suggestListingTitle(input: GeminiTitleSuggestionInput): Promise<GeminiTitleSuggestionResult>;
 }
