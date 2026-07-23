@@ -224,25 +224,34 @@ console (App Category "Drop Shipping") to get `ALIEXPRESS_APP_KEY` / `ALIEXPRESS
 step is fully self-serve, and the "AliExpress-dropship" API permission group is granted automatically
 alongside "System Tool" when the app is created (no separate approval step observed in practice).
 
-**Check your app's "Auth Management" page for its actual Access/Refresh Token Duration** — one real
-account observed **1-day access tokens / 2-day refresh tokens**, which is why this adapter
-auto-refreshes (`RealAliExpressClient.ensureFreshSession()`) rather than treating the token as a
-long-lived static secret the way CJ's is treated. As long as something touches this supplier at least
-once every couple of days (the repricing sweep alone does, hourly), the refresh token should keep
-rolling forward indefinitely — **TODO(HUMAN)**: confirm AliExpress actually rotates the refresh token
-on each use (extending its 2-day window) rather than keeping a fixed expiry from initial authorization;
-if it's the latter, full re-authorization (steps 2 below) will be needed roughly every 2 days.
+**Check your app's "Auth Management" page for its actual Access/Refresh Token Duration.** Confirmed
+against a real account: **1-day access tokens, 2-day refresh tokens, and the refresh token's expiry is
+fixed at initial authorization — it is NOT extended by using it to refresh.** Two live refresh calls in
+a row returned an identical `refresh_token_valid_time`. This means **full re-authorization (step 2
+below) is unavoidable roughly every 2 days**, no matter how often the automatic refresh runs — there is
+no way to keep this integration connected purely automatically long-term. Budget for redoing step 2
+periodically (or build a reminder for yourself) until/unless a future version adds a
+notification when the refresh token is close to its hard expiry.
 
 1. Register the app, get `ALIEXPRESS_APP_KEY` / `ALIEXPRESS_APP_SECRET`.
 2. Run AliExpress's OAuth authorization flow once (as the specific AliExpress account that will
    actually fulfill dropshipping orders) to obtain an initial `ALIEXPRESS_OAUTH_ACCESS_TOKEN` /
-   `ALIEXPRESS_OAUTH_REFRESH_TOKEN` pair — the callback URL is whatever you set on the app (doesn't need
-   to be a real working endpoint; the authorization `code` appears in the browser's address bar after
-   redirect even if nothing responds there). Exchange the code for tokens via the same signed gateway
-   (`method=auth/token/create`) or your console's own token-generation tool if it has one.
-   **TODO(HUMAN)**: the exact exchange/refresh endpoint shapes (`auth/token/create`,
-   `auth/token/refresh`) are unverified against a live account — confirm against AliExpress's actual
-   docs once you're here; `RealAliExpressClient`'s refresh implementation is flagged the same way.
+   `ALIEXPRESS_OAUTH_REFRESH_TOKEN` pair:
+   ```
+   https://api-sg.aliexpress.com/oauth/authorize?response_type=code&client_id=<APP_KEY>&redirect_uri=<CALLBACK_URL>&sp=ae&view=web
+   ```
+   The callback URL needs to land on a real response for the authorization `code` to be visible — this
+   Worker has a purpose-built landing page at `/oauth/aliexpress/callback` (see
+   `apps/worker/src/routes/oauth.ts`) that just displays the code for you to copy; register that as your
+   app's Callback URL. Then exchange the code for tokens — **confirmed working** against a live account:
+   ```
+   GET https://api-sg.aliexpress.com/rest/auth/token/create?app_key=...&timestamp=...&sign_method=sha256&code=...&sign=...
+   ```
+   Note this is a **separate REST endpoint family** from the `/sync` gateway used for `aliexpress.ds.*`
+   business calls, and its signature is computed differently: HMAC-SHA256 over `/auth/token/create` (the
+   path) prepended to the sorted-concatenated params — see `sign.ts`'s docstring for why. Token refresh
+   uses the identical pattern at `/rest/auth/token/refresh`, which `RealAliExpressClient` performs
+   automatically.
 3. Set secrets (these only seed the *first* request — `RealAliExpressClient` persists every subsequent
    refreshed token onto the `suppliers` row itself, not back into these static secrets):
    ```

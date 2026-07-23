@@ -45,6 +45,7 @@ export interface Env {
   ALIEXPRESS_OAUTH_ACCESS_TOKEN?: string;
   ALIEXPRESS_OAUTH_REFRESH_TOKEN?: string;
   ALIEXPRESS_GATEWAY_URL?: string;
+  ALIEXPRESS_REST_BASE_URL?: string;
   CJ_API_KEY?: string;
   CJ_BASE_URL?: string;
   GMAIL_CLIENT_ID?: string;

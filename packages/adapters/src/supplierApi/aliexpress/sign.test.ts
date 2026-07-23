@@ -33,4 +33,18 @@ describe('signAliExpressParams', () => {
     expect(sig).toMatch(/^[0-9A-F]+$/);
     expect(sig).toBe(sig.toUpperCase());
   });
+
+  it('omitting apiPath is equivalent to passing an empty string (the /sync gateway convention)', async () => {
+    const params = { a: '1', b: '2' };
+    const sigDefault = await signAliExpressParams(params, 'secret');
+    const sigExplicitEmpty = await signAliExpressParams(params, 'secret', '');
+    expect(sigDefault).toBe(sigExplicitEmpty);
+  });
+
+  it('a non-empty apiPath changes the signature (the /rest/auth/token/* convention) — confirmed against a live account', async () => {
+    const params = { a: '1', b: '2' };
+    const sigNoPath = await signAliExpressParams(params, 'secret');
+    const sigWithPath = await signAliExpressParams(params, 'secret', '/auth/token/refresh');
+    expect(sigWithPath).not.toBe(sigNoPath);
+  });
 });

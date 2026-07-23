@@ -2,7 +2,10 @@ export interface AliExpressEnv {
   MOCK_MODE?: string;
   ALIEXPRESS_APP_KEY?: string;
   ALIEXPRESS_APP_SECRET?: string;
+  /** Base URL for the `/sync` JSON-RPC-style business-method gateway (aliexpress.ds.*). */
   ALIEXPRESS_GATEWAY_URL?: string;
+  /** Base URL for the separate `/rest/auth/token/*` OAuth endpoints — see real.ts's docstring. */
+  ALIEXPRESS_REST_BASE_URL?: string;
 }
 
 /**

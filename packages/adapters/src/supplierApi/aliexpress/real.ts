@@ -17,26 +17,30 @@ function newBucket(): TokenBucket {
 }
 
 /**
- * AliExpress Open Platform — single-gateway TOP-style API (one endpoint,
- * `method` + signed params, not per-resource REST paths), using the
- * `aliexpress.ds.*` (Dropshipping) method namespace per spec 6c. Method names
- * and response field shapes follow AliExpress's published Dropshipping API
- * docs; TODO(HUMAN): verify against a live Open Platform app once
- * registered — see DEPLOY.md.
+ * AliExpress Open Platform actually runs two different gateway families
+ * (confirmed empirically against a live account, 2026-07 — see
+ * DECISIONS.md): the `/sync` JSON-RPC-style gateway for `aliexpress.ds.*`
+ * (Dropshipping) business methods per spec 6c, and separate `/rest/auth/
+ * token/*` REST endpoints for the OAuth token lifecycle, which sign
+ * differently (path-prefixed — see `sign.ts`'s docstring) and take GET query
+ * params, not a POST body. Business-method names/response shapes below
+ * still follow AliExpress's published Dropshipping API docs without
+ * verification against a live account; TODO(HUMAN): confirm those once
+ * you're placing real orders — see DEPLOY.md.
  *
  * `session` (the OAuth access token tied to the specific dropshipping
  * account these calls act on behalf of) is a required TOP system param for
  * account-scoped methods like `aliexpress.ds.order.create` — unlike
  * `app_key`/`app_secret` (this app's own identity), `session` identifies
- * *whose* dropshipping relationship the call executes under. Unlike CJ's
- * long-lived pre-obtained key, AliExpress's console shows a 1-day access
- * token / 2-day refresh token — short-lived enough that a static secret
- * would break within a day, so this client self-refreshes exactly like
- * eBay/Amazon/Gmail (`ensureFreshSession()` below), reporting the new token
- * via `onTokenRefreshed` so the caller can persist it. TODO(HUMAN): the
- * refresh endpoint (`auth/token/refresh` via the same signed gateway) is
- * unverified against a live account — confirm the exact method name/response
- * shape once registered, per DEPLOY.md.
+ * *whose* dropshipping relationship the call executes under. A live
+ * account's console showed a 1-day access token / 2-day refresh token, and —
+ * confirmed by two live refresh calls returning an identical
+ * `refresh_token_valid_time` each time — that refresh-token ceiling is fixed
+ * from initial authorization, not extended on use. So `ensureFreshSession()`
+ * below keeps the access token alive indefinitely as long as something
+ * refreshes at least every ~2 days, but full re-authorization (DEPLOY.md
+ * step 2) is unavoidable roughly every 2 days regardless — there is no way
+ * to keep this supplier connected purely automatically long-term.
  */
 export class RealAliExpressClient implements SupplierApiClient {
   private readonly bucket = newBucket();
@@ -54,30 +58,31 @@ export class RealAliExpressClient implements SupplierApiClient {
     return this.env.ALIEXPRESS_GATEWAY_URL ?? 'https://api-sg.aliexpress.com/sync';
   }
 
+  private restAuthBaseUrl(): string {
+    return this.env.ALIEXPRESS_REST_BASE_URL ?? 'https://api-sg.aliexpress.com/rest';
+  }
+
   private async ensureFreshSession(): Promise<string> {
     if (this.tokens.expiresAt - TOKEN_REFRESH_MARGIN_MS > Date.now()) {
       return this.tokens.accessToken;
     }
-    const refreshParams: Record<string, string> = {
+    const path = '/auth/token/refresh';
+    const params: Record<string, string> = {
       app_key: this.env.ALIEXPRESS_APP_KEY ?? '',
-      method: 'auth/token/refresh',
       timestamp: String(Date.now()),
-      format: 'json',
-      v: '2.0',
       sign_method: 'sha256',
       refresh_token: this.tokens.refreshToken,
     };
-    const sign = await signAliExpressParams(refreshParams, this.env.ALIEXPRESS_APP_SECRET ?? '');
-    const body = new URLSearchParams({ ...refreshParams, sign });
-    const res = await fetchWithBackoff(
-      this.gatewayUrl(),
-      { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body },
-      this.bucket,
-    );
+    const sign = await signAliExpressParams(params, this.env.ALIEXPRESS_APP_SECRET ?? '', path);
+    const qs = new URLSearchParams({ ...params, sign });
+    const res = await fetchWithBackoff(`${this.restAuthBaseUrl()}${path}?${qs.toString()}`, { method: 'GET' }, this.bucket);
     if (!res.ok) {
       throw new Error(`AliExpress OAuth token refresh failed: ${res.status} ${await res.text()}`);
     }
-    const json = (await res.json()) as { access_token: string; refresh_token: string; expire_time: number };
+    const json = (await res.json()) as { access_token: string; refresh_token: string; expire_time: number; code?: string; message?: string };
+    if (json.code && json.code !== '0') {
+      throw new Error(`AliExpress OAuth token refresh failed: ${json.code} ${json.message ?? ''}`);
+    }
     this.tokens = {
       accessToken: json.access_token,
       refreshToken: json.refresh_token,

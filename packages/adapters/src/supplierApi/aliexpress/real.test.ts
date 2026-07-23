@@ -29,20 +29,22 @@ describe('RealAliExpressClient — session param', () => {
 });
 
 describe('RealAliExpressClient — token refresh', () => {
-  it('refreshes an expired session token before the request (AliExpress access tokens are ~1 day, so this path is exercised often), and reports the new tokens via onTokenRefreshed', async () => {
+  it('refreshes an expired session token via the REST auth endpoint (GET, path-prefixed signature — see sign.ts) before the request, and reports the new tokens via onTokenRefreshed', async () => {
     const EXPIRED_TOKENS: AliExpressTokenSet = { accessToken: 'stale-session', refreshToken: 'refresh-1', expiresAt: Date.now() - 1000 };
-    const calls: URLSearchParams[] = [];
+    let refreshUrl: string | undefined;
+    let searchBody: URLSearchParams | undefined;
     let refreshedArg: AliExpressTokenSet | undefined;
     const freshExpiry = Date.now() + 86_400_000;
 
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-        const body = new URLSearchParams(init?.body as string);
-        calls.push(body);
-        if (body.get('method') === 'auth/token/refresh') {
-          return jsonResponse({ access_token: 'fresh-session', refresh_token: 'fresh-refresh', expire_time: freshExpiry });
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/auth/token/refresh')) {
+          refreshUrl = url;
+          return jsonResponse({ access_token: 'fresh-session', refresh_token: 'fresh-refresh', expire_time: freshExpiry, code: '0' });
         }
+        searchBody = new URLSearchParams(init?.body as string);
         return jsonResponse({ ds_text_search_response: { data: { products: [] } } });
       }),
     );
@@ -52,15 +54,29 @@ describe('RealAliExpressClient — token refresh', () => {
     });
     await client.searchProduct('widget');
 
+    // Refresh hit the dedicated REST endpoint (a GET with query params), not the /sync gateway.
+    expect(refreshUrl).toContain('/rest/auth/token/refresh');
+    expect(refreshUrl).toContain('refresh_token=refresh-1');
     // The actual search request used the newly-refreshed token, not the stale one passed in.
-    const searchCall = calls.find((c) => c.get('method') === 'aliexpress.ds.text.search');
-    expect(searchCall?.get('session')).toBe('fresh-session');
+    expect(searchBody?.get('session')).toBe('fresh-session');
     // onTokenRefreshed carries the real new token values — a caller that only
     // persisted expiry (the exact bug already fixed for Gmail/storefronts)
     // would silently keep serving the stale session on every later call.
     expect(refreshedArg?.accessToken).toBe('fresh-session');
     expect(refreshedArg?.refreshToken).toBe('fresh-refresh');
     expect(refreshedArg?.expiresAt).toBe(freshExpiry);
+    vi.unstubAllGlobals();
+  });
+
+  it('throws with the AliExpress error code/message when the refresh call itself reports failure (e.g. an expired refresh token)', async () => {
+    const EXPIRED_TOKENS: AliExpressTokenSet = { accessToken: 'stale-session', refreshToken: 'expired-refresh', expiresAt: Date.now() - 1000 };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse({ code: 'InvalidRefreshToken', message: 'refresh token expired' })),
+    );
+
+    const client = new RealAliExpressClient(ENV, EXPIRED_TOKENS, async () => undefined);
+    await expect(client.searchProduct('widget')).rejects.toThrow(/InvalidRefreshToken/);
     vi.unstubAllGlobals();
   });
 });

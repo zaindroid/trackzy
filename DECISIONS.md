@@ -941,3 +941,36 @@ separate approval step was needed in practice, resolving the uncertainty flagged
   secret in this codebase uses (`EBAY_OAUTH_*`, `AMAZON_OAUTH_*`, `GMAIL_OAUTH_*`) — these are now
   explicitly documented as *seed* values only, read once to bootstrap the first request; every
   subsequent refresh persists onto the `suppliers` row itself, not back into the static secret.
+
+## Post-milestone-10 — AliExpress OAuth endpoint/signing corrected against a live account
+
+The token-refresh implementation above shipped with an explicit `TODO(HUMAN): verify against a live
+account` on its endpoint/method-name guess (`method=auth/token/refresh` via the `/sync` gateway, params
+signed with no path prefix). Walking the user through actual authorization the same day surfaced that
+this guess was wrong in two ways at once, discovered by trial against the real API rather than docs
+(none were available to consult directly):
+- `POST /sync` with `method=auth/token/create` returned `InvalidApiPath` — the `/sync` JSON-RPC-style
+  gateway (used correctly for `aliexpress.ds.*` business methods) doesn't route OAuth token operations
+  at all; they live on a **separate REST endpoint family**, `/rest/auth/token/{create,refresh}`, called
+  via `GET` with query params, not `POST` with a body.
+- Signing those REST endpoints with the exact same params-only HMAC (correct for `/sync`) returned
+  `IncompleteSignature`. Prepending the request path (`/auth/token/refresh`) to the sorted-concatenated
+  param string before HMAC'ing — a common variant in Alibaba-family REST signing that pure `/sync`
+  JSON-RPC calls don't use — was accepted immediately.
+- **`signAliExpressParams` gained an optional third `apiPath` parameter** (default `''`, preserving
+  every existing `/sync` call site's behavior unchanged) rather than a second signing function, since
+  the algorithm is identical modulo one optional prefix — reusing the existing, already-tested pure
+  function was simpler than duplicating it.
+- **A second live refresh call (using the fresh refresh token from the first) confirmed something the
+  original TODO had flagged as an open question**: `refresh_token_valid_time` in the response was
+  byte-identical across both calls (`1784983588000`, i.e. 2026-07-25T12:46:28Z) despite each call
+  returning a brand-new `access_token`/`refresh_token` pair. The refresh token's absolute expiry is
+  fixed at initial authorization, **not** extended by using it — meaning full manual re-authorization
+  (DEPLOY.md section 11, step 2) is a real, unavoidable ~2-day recurring requirement for this
+  integration, not just a theoretical edge case. Documented prominently in both `real.ts`'s class
+  docstring and DEPLOY.md rather than left to be rediscovered when it silently stops working.
+- `real.test.ts` was rewritten to mock the refresh call by URL (`/auth/token/refresh`, a `GET`) rather
+  than by request body, since the previous version's `POST`-with-`method`-param mock shape no longer
+  matches reality; added a second case asserting the client surfaces AliExpress's own `code`/`message`
+  when a refresh call itself reports failure (e.g. an actually-expired refresh token), so that failure
+  mode reads as "AliExpress rejected this" rather than a generic parse error.
