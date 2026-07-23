@@ -1008,3 +1008,38 @@ guessing at. Both guesses were wrong, in ways only a real response could have ca
   in-stock, the three now-required search params actually being sent, and a graceful empty array when
   `selection_search_product` is absent — a real shape for a zero-result search, confirmed live for a
   nonsense query).
+
+## Post-milestone-10 — CJ Dropshipping: wrong auth method assumed, two real business-method bugs found
+
+Setting up CJ live surfaced the same class of "guess was plausible but wrong" issue as AliExpress, this
+time catchable against CJ's own published docs rather than trial and error alone:
+- **The original design assumed a raw email+password login endpoint.** A live attempt (correctly
+  JSON-formatted, confirmed by reproducing the exact same request from two different environments) was
+  rejected with `"Email or password is wrong"` — but the error message itself pointed at an alternative
+  `apiKey` mode. Fetching CJ's actual docs (`developers.cjdropshipping.cn/en/api/api2/api/auth.html`)
+  confirmed the real flow: a dashboard-generated key shaped `CJUserNum@api@<random>`, POSTed as
+  `{"apiKey": "..."}` to the *same* `getAccessToken` endpoint, returning `accessToken`/`refreshToken`/
+  expiry fields — not the email/password body originally assumed. A live exchange returned a token valid
+  for **~6 months** (far past the "~15 days" figure in the original design, which had no live account to
+  check against at the time), so the existing "static, manually-renewed secret" architecture (no full
+  OAuth refresh subsystem, unlike AliExpress) remains the right call — just fixed to describe the real
+  acquisition method. CJ does document a real `refreshAccessToken` endpoint; not wired up now since the
+  long token life doesn't make automatic refresh urgent, but noted as a legitimate future upgrade using
+  the same `suppliers.oauth*Ref` pattern AliExpress already established.
+- **`searchProduct` was searching the wrong field.** `productName` (used originally) and `productNameEn`
+  are genuinely different fields — confirmed live, the identical query `"phone case"` returned 672
+  matches via `productName` vs 30,685 via `productNameEn`. Since this app's listings/catalog are English,
+  `productNameEn` is the correct field; the original code wasn't broken (it returned *something*), just
+  silently searching a much narrower/wrong-language field the whole time — the kind of bug that would
+  never throw an error, just quietly return worse matches forever.
+- **`getOffer`'s price/stock live per-variant** (`data.variants[]`, confirmed live — a product can have
+  several color/size variants), not at the top level as originally guessed; a top-level `sellPrice` field
+  does exist but only reflects one arbitrary variant. Same "cheapest available variant" aggregation
+  approach as AliExpress's `getOffer` fix above, for consistency. **`inventoryNum` was `null` (not `0`)
+  for every variant on the one live product checked** — treated as "not tracked, assume available" rather
+  than "out of stock", since the alternative would incorrectly pause most of a real catalog whenever CJ
+  simply doesn't report live inventory for a listing (a real, live-observed data quality issue, not a
+  hypothetical edge case invented for coverage).
+- New `real.test.ts` (CJ had none before) asserts the corrected search field, cheapest-variant selection,
+  and the specific "null inventory is available, zero inventory is not" distinction — directly guarding
+  the exact behavior a live account revealed, not a hypothetical.

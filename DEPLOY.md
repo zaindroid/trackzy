@@ -270,17 +270,27 @@ sorted, concatenated params) using `ALIEXPRESS_APP_SECRET` — no further manual
 
 ## 12. CJ Dropshipping
 
-**TODO(HUMAN)**: Create a [CJ Dropshipping](https://cjdropshipping.com/) account, then obtain a
-`CJ-Access-Token` via CJ's own email+password login endpoint **once, out-of-band** (their token is
-long-lived, ~15 days per their docs — deliberately not fetched automatically by this app on every
-request; see DECISIONS.md milestone 4 for why keeping your account password out of the Worker's
-request path entirely is safer). Set:
-```
-pnpm --filter @fulfillment-tracker/worker exec wrangler secret put CJ_API_KEY --config ../../wrangler.toml
-```
-You'll need to repeat the manual login step and rotate this secret roughly every two weeks (or before
-it expires) until/unless you automate the rotation yourself. Insert/update a `suppliers` row with
-`provider = 'cj'`, `kind = 'api'`.
+**TODO(HUMAN)**: Create a [CJ Dropshipping](https://cjdropshipping.com/) account. **Do not use the
+email+password login endpoint** — confirmed live, it rejects credentials for accounts using "apiKey
+mode" (which appears to be the default now) and its own error message points at the alternative below.
+1. In your CJ account dashboard, find the **API** / developer settings section and generate an API key
+   — it looks like `CJUserNum@api@xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`.
+2. Exchange it for a real access token, **once, out-of-band** (confirmed working live):
+   ```
+   curl -s -X POST https://developers.cjdropshipping.com/api2.0/v1/authentication/getAccessToken \
+     -H "Content-Type: application/json" \
+     -d '{"apiKey": "CJUserNum@api@..."}'
+   ```
+   The response's `data.accessToken` is what `CJ_API_KEY` should be set to (not the raw `apiKey` from
+   step 1) — a live account's token was valid for **~6 months**, comfortably long enough that manual
+   renewal (repeating this step, updating the secret) is practical. CJ does document a real
+   `/authentication/refreshAccessToken` endpoint if automatic renewal is ever worth adding — this
+   adapter doesn't use it yet, unlike the full auto-refresh eBay/Amazon/Gmail/AliExpress have.
+3. Set the secret:
+   ```
+   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put CJ_API_KEY --config ../../wrangler.toml
+   ```
+4. Insert/update a `suppliers` row with `provider = 'cj'`, `kind = 'api'`.
 
 ## 13. Gmail API (supplier shipping-confirmation email polling)
 
