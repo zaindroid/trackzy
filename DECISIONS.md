@@ -1166,3 +1166,56 @@ extension does wrong.
   Playwright-less test setup) can't exercise. Verifying this stays working is a live-account check, same
   as the selector/CORS fixes above — noted here rather than silently claiming test coverage that doesn't
   exist for this specific fix.
+
+## Platform CHECK constraint finally widened (the deferred blocker from milestone 10, resolved)
+
+With eBay's developer account approved and a real storefront row actually needing to be inserted, the
+`storefronts.platform` CHECK constraint deferred back in the Phase 2 remote migration retrofit entry
+became a real, immediate blocker rather than a theoretical one. Resolved it properly rather than
+deferring further, given real production order/fulfillment data was on the line.
+- **First tried the lowest-risk option**: SQLite's `PRAGMA writable_schema` lets you directly rewrite a
+  table's stored `CREATE TABLE` text (including its CHECK clause) without moving any data or triggering
+  FK validation at all, since no table is actually dropped or rebuilt. Verified this technique end-to-end
+  against a local file-based SQLite database seeded with the exact real production schema + data first
+  (widened the CHECK, reconnected fresh, confirmed old data untouched, confirmed the new CHECK genuinely
+  accepts `'ebay'` and still rejects garbage, confirmed `PRAGMA integrity_check`/`foreign_key_check` both
+  clean) — it worked perfectly locally. **D1 blocks it outright** (`SQLITE_AUTH`, confirmed by testing
+  directly against the real remote database before attempting the actual edit) — Cloudflare's managed
+  D1 doesn't allow this pragma, presumably to protect its own internal replication/consistency
+  guarantees. A clean dead end, ruled out safely without ever touching real data.
+- **Fell back to the full cascading rebuild**, but de-risked it properly given the real stakes (this
+  touches actual Shopify order/fulfillment history, not test data):
+  1. **Took a full `wrangler d1 export` backup first** — a genuine rollback path if anything went wrong,
+     confirmed valid (17 tables, 48 real data rows) before proceeding.
+  2. **Deleted the one piece of non-production data in the rebuild's scope** (a manual_tasks test row
+     from the earlier extension testing) so the cascade's blast radius was limited to tables that
+     actually need real-data preservation: `storefronts` (2 rows) → `orders` (7) →
+     `order_line_items`/`fulfillments` (8/5) → `fulfillment_line_items`/`disputes` (3/1). Every other
+     Phase 2 table in the FK chain (`listings`, `manual_tasks`, `messages`, `supplier_offers`,
+     `tracking_events`) was confirmed empty on production, so dropping and recreating them was trivially
+     safe — no data to lose, no FK violation possible.
+  3. **Fetched the exact live `CREATE TABLE` SQL for all 11 affected tables directly from production**
+     (`SELECT sql FROM sqlite_master`) rather than reconstructing it from `schema.ts`/migrations by
+     hand, guaranteeing byte-for-byte fidelity with what's actually deployed — then applied one targeted
+     string replacement to widen just `storefronts`' CHECK clause, with an explicit assertion that the
+     replacement actually matched something (failing loudly rather than silently no-op'ing if the live
+     schema text ever looked different than expected).
+  4. **Reused the exact real `INSERT` statements from the backup file** for the six data-bearing tables
+     rather than hand-transcribing values — eliminates an entire class of transcription-error risk for
+     real order data. Assembled the full script as: drop all 11 tables in dependency order (leaves
+     first) → recreate all 11 (parents first, `storefronts` now with the widened CHECK) → reinsert the
+     six tables' real data (parents first, so FK validation passes on insert).
+  5. **Validated the complete 48-statement script against a local SQLite database loaded with the real
+     backup**, executed inside one explicit transaction (matching D1's real atomic-batch behavior
+     exactly) before ever touching production — confirmed `PRAGMA integrity_check` clean, `PRAGMA
+     foreign_key_check` clean, every table's row count and every order/dispute's actual field values
+     identical before and after, and — the actual point of the whole exercise — a real `INSERT ...
+     platform='ebay'` succeeding for the first time.
+  6. **Only then executed against the real remote database**, followed immediately by the same
+     verification pass (row counts, live storefront data, a real authenticated `GET /api/orders` call
+     against the live Worker) to confirm the running application was completely unaffected.
+- **Explicitly asked the user for confirmation before attempting this**, given it's meaningfully more
+  invasive than any other database operation this session — real order/fulfillment history, not test
+  data, with the honest framing that even with a backup and thorough local validation, this class of
+  operation deserves an explicit go-ahead rather than being executed unilaterally under a general
+  "extend the app" mandate.

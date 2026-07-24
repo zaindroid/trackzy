@@ -132,18 +132,11 @@ these steps — none of it is required for `pnpm dev` / `pnpm test`.
 
 ## 8. eBay (Sell APIs: Fulfillment, Inventory, Post-Order) + non-API fallback
 
-**⚠️ BLOCKER — read before inserting a real eBay `storefronts` row**: on the real production database
-(as of the Gmail-integration deployment), `storefronts.platform`'s CHECK constraint still only allows
-`'shopify'` — it was **not** widened to include `'ebay'`/`'amazon'` when the rest of Phase 2's schema was
-retrofitted onto the live, already-populated database, because doing so safely requires a coordinated
-rebuild of `storefronts` and every table transitively chained to it via foreign keys (`orders` →
-`order_line_items`/`fulfillments` → `fulfillment_line_items`/`disputes`), all of which have real data.
-See DECISIONS.md's "Phase 2 remote migration retrofit" entry for the full reasoning. **Attempting to
-insert an eBay storefront row today will fail with a CHECK constraint violation.** Before step 4 below,
-this needs to be resolved — either by carefully performing that cascading rebuild (plan it out, verify
-with `PRAGMA foreign_key_check` afterward) or by deciding to drop the DB-level CHECK on `platform`
-entirely and rely on TypeScript's compile-time enum enforcement alone. Flag this to whoever's doing the
-setup so it isn't rediscovered mid-flow.
+**Resolved (2026-07):** `storefronts.platform`'s CHECK constraint on the real production database now
+allows `'ebay'`/`'amazon'` as well as `'shopify'` — see DECISIONS.md's "Platform CHECK constraint
+finally widened" entry for how (a coordinated, backed-up, locally-validated rebuild of `storefronts` and
+every table transitively chained to it via foreign keys). A real eBay storefront row can be inserted
+directly now; no further blocker here.
 
 **TODO(HUMAN)**: Register at the [eBay Developers Program](https://developer.ebay.com/), then:
 1. Create a **Keyset** (Production, once you're past sandbox testing) — this gives you
@@ -177,9 +170,10 @@ below) to paste into eBay's own "Add tracking" page by hand.
 
 ## 9. Amazon SP-API (orders, RDT-gated address access, feeds, listings)
 
-**⚠️ Same blocker as eBay's section 8 applies here** — a real `storefronts` row with `platform='amazon'`
-will also be rejected by the production database's CHECK constraint until that's resolved. See section
-8's warning and DECISIONS.md's "Phase 2 remote migration retrofit" entry.
+**Not currently in use** for this deployment (the user's business model doesn't need Amazon as a sales
+channel, only as a supplier — see section 10). The `platform='amazon'` CHECK constraint blocker
+mentioned in earlier versions of this doc is resolved regardless (same fix as section 8), so this
+section is ready to pick up later if that ever changes.
 
 **TODO(HUMAN)**: Register as a [Selling Partner API developer](https://developer.amazonservices.com/)
 and create a **self-authorized private application** (the correct shape for a single seller
