@@ -1143,3 +1143,26 @@ active-manual-task' from origin 'https://www.amazon.de' has been blocked by CORS
   response carry `Access-Control-Allow-Origin` from an arbitrary cross-origin `Origin` header — this
   specific bug is exactly the kind that's invisible to any test asserting on response *bodies* alone
   (the JSON payload was always correct), so a dedicated header-focused test was needed.
+
+## Post-milestone-10 — Amazon's autocomplete widget wipes the pasted address a moment later
+
+With CORS fixed, the paste button worked — briefly. Live behavior: fields visibly filled, then went
+blank again within about a second. The DE checkout page's "Street address" field is a live autocomplete
+combobox (`aria-autocomplete="list"`, its own suggestions dropdown backed by an async Backbone-driven
+fetch — visible in the console as `AddressWizardAssets` publish/metric calls firing right after the
+paste). Setting `.value` once and dispatching `input`/`change` is exactly how a real keystroke is
+simulated, and it *does* register — the field just doesn't stay that way, because the field's own
+async suggestions cycle re-renders and overwrites it shortly after, independent of anything this
+extension does wrong.
+- **Fix: re-assert every field's value on a short delay schedule (0ms, 300ms, 800ms, 1500ms)** after
+  the click, rather than a single set-and-dispatch. This is the standard, low-effort mitigation for
+  "a framework/widget's own async logic overwrites my programmatic input" — it doesn't require reverse
+  engineering Amazon's specific autocomplete widget internals (its exact re-render trigger/timing is
+  undocumented and could change), just outlasting it. Each re-application skips fields already holding
+  the correct value (`el.value === field.value`), so this doesn't cause visible flicker or extra
+  network calls once a field has genuinely settled.
+- Not covered by a unit test — this is fundamentally about *real browser timing against a live
+  third-party page's async JS*, which `addressMapping.test.ts`'s pure-function tests (and any
+  Playwright-less test setup) can't exercise. Verifying this stays working is a live-account check, same
+  as the selector/CORS fixes above — noted here rather than silently claiming test coverage that doesn't
+  exist for this specific fix.

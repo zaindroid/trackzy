@@ -1,6 +1,16 @@
 import { fetchActiveManualTask, markManualTaskOrdered } from '../lib/api.js';
 import { mapAddressToFields } from '../lib/addressMapping.js';
 
+// Amazon's "Street address" field is a live autocomplete combobox
+// (aria-autocomplete="list", its own suggestions dropdown) — confirmed live:
+// pasting into it visibly fills the field, then Amazon's own async
+// suggestion-fetch/re-render cycle wipes it a moment later. A single
+// set-and-dispatch isn't enough for a field with its own async widget state;
+// re-asserting the values over a short window is the standard way to win
+// against that kind of framework-driven overwrite without needing to
+// reverse-engineer Amazon's specific widget internals.
+const REASSERT_DELAYS_MS = [0, 300, 800, 1500];
+
 /**
  * "PasteMe" parity (spec 6d): on an Amazon checkout-like page, fetches the
  * active manual_task and injects a floating button (bottom-right of the
@@ -27,12 +37,17 @@ async function injectCheckoutControls(): Promise<void> {
   pasteButton.style.cssText = buttonStyle('#0b74de');
   pasteButton.onclick = () => {
     const fields = mapAddressToFields(task.payload.shipTo!);
-    for (const field of fields) {
-      const el = document.querySelector<HTMLInputElement | HTMLSelectElement>(field.selector);
-      if (!el) continue;
-      el.value = field.value;
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
+    const applyOnce = () => {
+      for (const field of fields) {
+        const el = document.querySelector<HTMLInputElement | HTMLSelectElement>(field.selector);
+        if (!el || el.value === field.value) continue;
+        el.value = field.value;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    };
+    for (const delay of REASSERT_DELAYS_MS) {
+      setTimeout(applyOnce, delay);
     }
   };
 
