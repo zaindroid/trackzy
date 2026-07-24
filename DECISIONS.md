@@ -1111,3 +1111,35 @@ original best-effort guess couldn't have caught without this:
   a floating button `content/checkout.ts` injects that pastes on click, which is why the address form's
   dynamic (post-click) appearance was never actually a timing bug to fix, just something to clarify once
   the real selector bugs were found and it was time to explain why "nothing happened" on the first try.
+
+## Post-milestone-10 — Missing CORS on /api/* (the real reason the extension looked broken)
+
+After fixing the checkout selectors above, the extension's "Paste shipping address" button *still*
+didn't work — but this time the browser's own DevTools console (checked live, on the real Amazon
+checkout page) had the actual answer, buried among a lot of unrelated noise from other unrelated
+extensions (a password manager, an ad blocker): `Access to fetch at '.../api/extension/
+active-manual-task' from origin 'https://www.amazon.de' has been blocked by CORS policy: ... No
+'Access-Control-Allow-Origin' header is present`.
+- **Root cause**: `/api/*` never set any CORS headers. The dashboard never needed them (it's served
+  same-origin by this same Worker), so this was invisible throughout the entire build — the extension
+  is the *first* client that calls the API cross-origin, from whatever marketplace page a content
+  script is injected into. A content script's own `fetch()` calls are bound by the host page's CORS
+  policy exactly like any other page script; `host_permissions` in the manifest does not exempt them
+  (that exemption only applies to fetches made from the extension's background service worker, which
+  this extension doesn't currently use for its API calls). The request was reaching the Worker,
+  authenticating correctly, and returning a valid response the whole time — the browser was just
+  discarding that response before the extension's own code ever saw it.
+- **Fix: `hono/cors` middleware on `/api/*`, allowing every origin.** Deliberately not scoped to a
+  fixed list of marketplace domains (amazon.com, amazon.de, ebay.com, ...) — that list would need
+  updating every time the extension's `host_permissions` grows to a new marketplace/country domain,
+  duplicating information that already lives in `manifest.json`. Allowing every origin here is safe
+  specifically because every `/api/*` route already requires a valid bearer token via `authMiddleware`
+  — an arbitrary origin gains nothing from being allowed to *ask*, since the token itself lives only in
+  `chrome.storage.local` (this extension's own storage), never exposed to page JS on any site,
+  malicious or otherwise. CORS restricts which *websites' scripts* can read a response, not who can
+  authenticate — and authentication here was never the layer this bug was in.
+- **New regression test** (`apps/worker/src/index.test.ts`, the first test file to exercise the
+  top-level app directly) asserts both the `OPTIONS` preflight response and the actual authed `GET`
+  response carry `Access-Control-Allow-Origin` from an arbitrary cross-origin `Origin` header — this
+  specific bug is exactly the kind that's invisible to any test asserting on response *bodies* alone
+  (the JSON payload was always correct), so a dedicated header-focused test was needed.
