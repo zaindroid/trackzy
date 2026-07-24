@@ -3,6 +3,7 @@ import { mapAddressToFields, type SelectorMap } from './addressMapping.js';
 
 const TEST_SELECTORS: SelectorMap = {
   name: '#name',
+  phone: '#phone',
   address1: '#address1',
   address2: '#address2',
   city: '#city',
@@ -38,8 +39,24 @@ describe('mapAddressToFields', () => {
     expect(withoutAddress2.some((f) => f.selector === '#address2')).toBe(false);
   });
 
-  it('falls back to the default Amazon selector map when none is given', () => {
+  it('includes phone only when present', () => {
+    const withPhone = mapAddressToFields(
+      { name: 'A', address1: 'B', city: 'C', state: 'D', zip: 'E', country: 'US', phone: '+15551234567' },
+      TEST_SELECTORS,
+    );
+    expect(withPhone).toContainEqual({ selector: '#phone', value: '+15551234567' });
+
+    const withoutPhone = mapAddressToFields({ name: 'A', address1: 'B', city: 'C', state: 'D', zip: 'E', country: 'US' }, TEST_SELECTORS);
+    expect(withoutPhone.some((f) => f.selector === '#phone')).toBe(false);
+  });
+
+  it('falls back to the default Amazon selector map when none is given, using the confirmed-live DE field names', () => {
     const fields = mapAddressToFields({ name: 'A', address1: 'B', city: 'C', state: 'D', zip: 'E', country: 'US' });
     expect(fields[0]?.selector).toContain('address-ui-widgets-enterAddressFullName');
+    // address1 (the visible "Street address" field) maps to the DOM's Line2,
+    // not Line1 — confirmed against a live amazon.de checkout page, the
+    // opposite of what the field name alone would suggest.
+    const address1Field = fields.find((f) => f.value === 'B');
+    expect(address1Field?.selector).toContain('enterAddressLine2');
   });
 });

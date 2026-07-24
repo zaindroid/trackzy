@@ -12,6 +12,7 @@ export interface ManualTaskPayload {
     state: string;
     zip: string;
     country: string;
+    phone?: string;
   };
   supplierOrderRef?: string;
 }

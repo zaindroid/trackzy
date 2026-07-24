@@ -3,14 +3,16 @@ import { mapAddressToFields } from '../lib/addressMapping.js';
 
 /**
  * "PasteMe" parity (spec 6d): on an Amazon checkout-like page, fetches the
- * active manual_task and injects a floating button that 1-click pastes the
- * buyer's shipping address into the page's address form, plus a "Mark
- * ordered" button that fires the manual-order-placed transition.
+ * active manual_task and injects a floating button (bottom-right of the
+ * viewport) that 1-click pastes the buyer's shipping address into the
+ * page's address form on click — not automatic on page load, since the
+ * "Add an address" form only exists in the DOM after a human opens it — plus
+ * a "Mark ordered" button that fires the manual-order-placed transition.
  *
- * TODO(HUMAN): the field selectors in addressMapping.ts are a best-effort
- * default, not verified against a live checkout page — inspect the actual
- * DOM once testing against a real Amazon account and update them. See
- * DEPLOY.md.
+ * The field selectors in addressMapping.ts are confirmed against a real
+ * amazon.de checkout page (2026-07) — see that file's docstring for the
+ * DE-specific address1/address2 swap this uncovered. TODO(HUMAN): a US (or
+ * other-country) Amazon account's form may differ; verify separately.
  */
 async function injectCheckoutControls(): Promise<void> {
   const task = await fetchActiveManualTask().catch(() => null);

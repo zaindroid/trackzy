@@ -1084,3 +1084,30 @@ explicitly authorizing the fifth call site.**
   original and had to be corrected to assert on the actual returned `suggestedTitle` value instead of an
   "it must have changed" assumption — the real Gemini call doesn't have this limitation, since it reasons
   over the title text directly rather than a fixed missing-terms list.
+
+## Post-milestone-10 — Extension checkout field selectors corrected against a live amazon.de page
+
+Inspected the real "Add an address" form on the user's actual Amazon Business checkout (amazon.de) —
+the first live-DOM verification this extension's checkout mapping had ever had. Found real bugs the
+original best-effort guess couldn't have caught without this:
+- **`address1`/`address2` were swapped from the intuitive reading.** The field visually labeled "Street
+  address" is `enterAddressLine2` in the DOM; the field labeled "Building or Company Name" is
+  `enterAddressLine1`. The original mapping had them the other way round (Line1→street,
+  Line2→building), so every paste would have written the buyer's street address into the wrong field.
+  The page's own hidden form-config value, literally named
+  `DENewAddressWizardFormConfigWithBuildingNameLabels`, confirms this swap is a deliberate,
+  Germany-specific Amazon behavior — flagged as `TODO(HUMAN)` that a US or other-country checkout may
+  use the more intuitive non-swapped ordering and needs separate verification.
+- **Germany's form has no "State/Region" field at all** (Postcode + Town/City only) — the `state`
+  selector stays in `DEFAULT_AMAZON_CHECKOUT_SELECTORS` for countries whose forms do have one (e.g. US),
+  since `content/checkout.ts` already skips any selector that resolves to no element — this was already
+  a harmless no-op, not something that needed fixing, just confirmed safe.
+- **Phone number is a required field the original mapping never accounted for at all.** Added `phone`
+  as a new optional field on `ManualTaskPayload['shipTo']` and threaded it through
+  `mapAddressToFields` (included only when present, same pattern as the existing optional `address2`) —
+  without it, a real paste would fill in every field except the one Amazon's form actually blocks
+  submission on.
+- The paste itself was never actually "automatic on page load" the way early debugging assumed — it's
+  a floating button `content/checkout.ts` injects that pastes on click, which is why the address form's
+  dynamic (post-click) appearance was never actually a timing bug to fix, just something to clarify once
+  the real selector bugs were found and it was time to explain why "nothing happened" on the first try.
