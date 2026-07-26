@@ -8,6 +8,7 @@ import { postToRadar } from './ingest.js';
 import { resolveSuppliers } from './supplier/lookup.js';
 import { ApifyAliexpressProvider } from './supplier/apifyProvider.js';
 import { AliexpressDsProvider } from './supplier/aliexpressDsProvider.js';
+import { refreshAliexpressToken } from './supplier/aliexpressToken.js';
 import { WorkerCacheClient } from './supplier/cacheClient.js';
 import type { EbayActiveSignal, EbaySoldSignal, RadarItem } from './types.js';
 
@@ -35,7 +36,7 @@ async function main() {
   console.log(
     `[radar] niches: ${config.groqApiKey ? 'LLM (Groq)' : 'seeds.json'} · ` +
       `demand: ${config.scraperApiKey ? 'ScraperAPI (items_sold)' : config.useApifySold && config.apifyToken ? 'Apify sold-velocity' : 'eBay Browse (competition + price)'} · ` +
-      `supplier: ${config.aliexpressAppKey && config.aliexpressAppSecret && config.aliexpressAccessToken ? 'AliExpress DS API (official, free)' : config.apifyToken ? `Apify (budget ${config.apifyMonthlyResultBudget}/mo)` : 'cache-only, misses→pending'}`,
+      `supplier: ${config.aliexpressAppKey && config.aliexpressAppSecret && (config.aliexpressAccessToken || config.aliexpressRefreshToken) ? 'AliExpress DS API (official, free)' : config.apifyToken ? `Apify (budget ${config.apifyMonthlyResultBudget}/mo)` : 'cache-only, misses→pending'}`,
   );
 
   // ── Phase 1: eBay demand + competition (the broad, free part) ──────────────
@@ -67,11 +68,23 @@ async function main() {
 
   const cache = new WorkerCacheClient(config.ingestUrl, config.ingestToken);
   // Prefer the official AliExpress Dropshipper API (free, no Apify) when the app
-  // creds + access_token are configured; otherwise fall back to the Apify actor.
+  // creds + a token are configured; otherwise fall back to the Apify actor.
   // DS lookups report resultsConsumed=0, so the Apify monthly ceiling doesn't apply.
-  const usingDs = !!(config.aliexpressAppKey && config.aliexpressAppSecret && config.aliexpressAccessToken);
+  //
+  // The 30-day access_token is refreshed at the start of each run from the
+  // (~60-day, reusable) refresh_token, so the crawler never runs expired. Falls
+  // back to the static access_token if refresh fails or no refresh_token is set.
+  let dsAccessToken = config.aliexpressAccessToken;
+  if (config.aliexpressAppKey && config.aliexpressAppSecret && config.aliexpressRefreshToken) {
+    const fresh = await refreshAliexpressToken(config.aliexpressAppKey, config.aliexpressAppSecret, config.aliexpressRefreshToken);
+    if (fresh) {
+      dsAccessToken = fresh;
+      console.log('[radar] AliExpress access token refreshed');
+    }
+  }
+  const usingDs = !!(config.aliexpressAppKey && config.aliexpressAppSecret && dsAccessToken);
   const provider = usingDs
-    ? new AliexpressDsProvider(config.aliexpressAppKey!, config.aliexpressAppSecret!, config.aliexpressAccessToken!, config.supplierTimeoutMs)
+    ? new AliexpressDsProvider(config.aliexpressAppKey!, config.aliexpressAppSecret!, dsAccessToken!, config.supplierTimeoutMs)
     : new ApifyAliexpressProvider(config.apifyToken ?? '', config.apifyAliexpressActorId, config.supplierTimeoutMs);
   // DS → effectively unlimited (no per-result cost). Apify → the monthly result
   // ceiling, or 0 (all misses pending) when there's no Apify token either.
