@@ -29,10 +29,15 @@ export const config = {
   // sold-velocity if you top up Apify or get Marketplace Insights approval.
   useApifySold: (process.env.USE_APIFY_SOLD || 'false').toLowerCase() === 'true',
 
-  // Optional: AliExpress Affiliate API (signed) for supplier cost/match. Without
-  // it, products are marked not-sourceable (still useful as a demand radar).
+  // AliExpress Dropshipper API (official, free) for supplier cost/match. Needs
+  // app key/secret + an OAuth access_token; when all three are set it's the
+  // supplier source (no Apify). refresh_token lets the crawler mint a fresh
+  // access_token per run (access ~30d, refresh ~60d). Without these, products
+  // are marked not-sourceable (still useful as a demand radar).
   aliexpressAppKey: process.env.ALIEXPRESS_APP_KEY || undefined,
   aliexpressAppSecret: process.env.ALIEXPRESS_APP_SECRET || undefined,
+  aliexpressAccessToken: process.env.ALIEXPRESS_ACCESS_TOKEN || undefined,
+  aliexpressRefreshToken: process.env.ALIEXPRESS_REFRESH_TOKEN || undefined,
 
   // Assumed default eBay final-value fee for the crawler's provisional margin.
   // The portal recomputes margin per-seller, so this is only a sort seed.

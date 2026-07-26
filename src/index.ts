@@ -7,7 +7,7 @@ import { buildRadarItem } from './score.js';
 import { postToRadar } from './ingest.js';
 import { resolveSuppliers } from './supplier/lookup.js';
 import { ApifyAliexpressProvider } from './supplier/apifyProvider.js';
-import { AffiliateSupplierProvider } from './supplier/affiliateProvider.js';
+import { AliexpressDsProvider } from './supplier/aliexpressDsProvider.js';
 import { WorkerCacheClient } from './supplier/cacheClient.js';
 import type { EbayActiveSignal, EbaySoldSignal, RadarItem } from './types.js';
 
@@ -32,11 +32,10 @@ async function main() {
   if (seeds.length === 0) seeds = loadSeeds().slice(0, config.maxNiches);
 
   console.log(`[radar] crawling ${seeds.length} niches → ${config.ingestUrl}`);
-  const usingAffiliateForLog = !!(config.aliexpressAppKey && config.aliexpressAppSecret);
   console.log(
     `[radar] niches: ${config.groqApiKey ? 'LLM (Groq)' : 'seeds.json'} · ` +
       `demand: ${config.scraperApiKey ? 'ScraperAPI (items_sold)' : config.useApifySold && config.apifyToken ? 'Apify sold-velocity' : 'eBay Browse (competition + price)'} · ` +
-      `supplier: ${usingAffiliateForLog ? 'AliExpress Affiliate API (free)' : config.apifyToken ? `Apify (budget ${config.apifyMonthlyResultBudget}/mo)` : 'cache-only, misses→pending'}`,
+      `supplier: ${config.aliexpressAppKey && config.aliexpressAppSecret && config.aliexpressAccessToken ? 'AliExpress DS API (official, free)' : config.apifyToken ? `Apify (budget ${config.apifyMonthlyResultBudget}/mo)` : 'cache-only, misses→pending'}`,
   );
 
   // ── Phase 1: eBay demand + competition (the broad, free part) ──────────────
@@ -67,16 +66,16 @@ async function main() {
   const survivors = scored.slice(0, config.topNSurvivors);
 
   const cache = new WorkerCacheClient(config.ingestUrl, config.ingestToken);
-  // Prefer OUR OWN AliExpress Affiliate API (signed, free, no Apify) when keys
-  // are configured; otherwise fall back to the Apify actor. Affiliate lookups
-  // report resultsConsumed=0, so the Apify monthly ceiling doesn't apply.
-  const usingAffiliate = !!(config.aliexpressAppKey && config.aliexpressAppSecret);
-  const provider = usingAffiliate
-    ? new AffiliateSupplierProvider(config.aliexpressAppKey!, config.aliexpressAppSecret!)
+  // Prefer the official AliExpress Dropshipper API (free, no Apify) when the app
+  // creds + access_token are configured; otherwise fall back to the Apify actor.
+  // DS lookups report resultsConsumed=0, so the Apify monthly ceiling doesn't apply.
+  const usingDs = !!(config.aliexpressAppKey && config.aliexpressAppSecret && config.aliexpressAccessToken);
+  const provider = usingDs
+    ? new AliexpressDsProvider(config.aliexpressAppKey!, config.aliexpressAppSecret!, config.aliexpressAccessToken!, config.supplierTimeoutMs)
     : new ApifyAliexpressProvider(config.apifyToken ?? '', config.apifyAliexpressActorId, config.supplierTimeoutMs);
-  // Affiliate → effectively unlimited (no per-result cost). Apify → the monthly
-  // result ceiling, or 0 (all misses pending) when there's no Apify token either.
-  const monthlyBudget = usingAffiliate ? Number.MAX_SAFE_INTEGER : config.apifyToken ? config.apifyMonthlyResultBudget : 0;
+  // DS → effectively unlimited (no per-result cost). Apify → the monthly result
+  // ceiling, or 0 (all misses pending) when there's no Apify token either.
+  const monthlyBudget = usingDs ? Number.MAX_SAFE_INTEGER : config.apifyToken ? config.apifyMonthlyResultBudget : 0;
 
   const resolutions = await resolveSuppliers(
     survivors.map((s) => ({ id: s.niche, query: s.niche })),

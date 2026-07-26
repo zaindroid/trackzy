@@ -8,7 +8,7 @@ Workers can't do long, throttled, IP-rotated crawls.
 ```
 GitHub Actions cron  ──►  eBay Browse API (active + price)
                           + Apify sold data (optional, velocity)
-                          + AliExpress Affiliate API (optional, supplier cost)
+                          + AliExpress Dropshipper API (supplier cost, official/free)
                           ──►  score  ──►  POST /ingest/radar  ──►  D1  ──►  /radar tab
 ```
 
@@ -23,7 +23,7 @@ uses **APIs, not scraping**:
 |---|---|---|
 | Active listings + price + competition | **eBay Browse API** (client-credentials) | ✅ works now, free |
 | Confirmed sold count / velocity | **Apify** sold-listings actor (optional) | ⚙️ set `APIFY_TOKEN` to enable |
-| Supplier match + cost | **AliExpress Affiliate API** (signed, optional) | ⚙️ set `ALIEXPRESS_APP_KEY/SECRET` |
+| Supplier match + cost | **AliExpress Dropshipper API** (official, signed, free) | ⚙️ set `ALIEXPRESS_APP_KEY/SECRET` + `ALIEXPRESS_ACCESS_TOKEN` |
 
 Without the optional ones, Radar still works — you get eBay demand/competition signals; velocity is 0
 and products show as not-sourceable until you add the keys. There is **no free official eBay
@@ -95,9 +95,26 @@ scoring), never the broad keyword universe.
    and posts everything — pending products show as "demand strong, supplier not
    yet checked" and are picked up automatically next month / after a top-up.
 
-**Providers are pluggable** (`SupplierProvider`): `ApifyAliexpressProvider` is
-active now; `AffiliateSupplierProvider` is a stub — swapping the primary to the
-(cost-free, no-CAPTCHA) AliExpress Affiliate API is one line in `index.ts`.
+**Providers are pluggable** (`SupplierProvider`): `AliexpressDsProvider` (the
+official Dropshipper API — free, no per-result cost, `resultsConsumed=0`) is the
+primary when `ALIEXPRESS_APP_KEY/SECRET/ACCESS_TOKEN` are set; otherwise it falls
+back to `ApifyAliexpressProvider`. Selection is one line in `index.ts`.
+
+### AliExpress Dropshipper API auth
+
+The DS API needs an OAuth `access_token` (~30-day life; `refresh_token` ~60 days).
+Obtain it once via the authorize flow:
+
+1. Open `https://api-sg.aliexpress.com/oauth/authorize?response_type=code&force_auth=true&client_id=<APP_KEY>&redirect_uri=<CALLBACK_URL>`, sign in as the **dropshipper (buyer)** account, approve.
+2. Copy the `code` from the redirect URL and exchange it at
+   `POST https://api-sg.aliexpress.com/rest/auth/token/create` (HMAC-SHA256 sign
+   over `/auth/token/create` + sorted `key+value`, App Secret as key).
+3. Put the returned `access_token` in `ALIEXPRESS_ACCESS_TOKEN` (secret).
+
+Business calls use the **`/sync`** gateway with `method=aliexpress.ds.text.search`
+and HMAC-SHA256 over sorted `key+value` (**no** path prepend). Prerequisite: the
+account has signed the **DS Center** dropshipping agreement and the app has the
+`AliExpress-dropship` permission group active.
 
 ### Config knobs
 

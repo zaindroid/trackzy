@@ -52,7 +52,12 @@ export async function generateNiches({ apiKey, model, count, themes }: NicheGenO
   const json = (await res.json()) as { choices?: { message?: { content?: string } }[] };
   const content = json.choices?.[0]?.message?.content ?? '{}';
   const parsed = JSON.parse(content) as { niches?: unknown };
-  const niches = Array.isArray(parsed.niches) ? parsed.niches.map((n) => String(n).trim()).filter(Boolean) : [];
+  const niches = Array.isArray(parsed.niches)
+    ? parsed.niches
+        // The model occasionally prepends the variety token to a niche — strip it.
+        .map((n) => String(n).replace(new RegExp(`\\b${nonce}\\b`, 'gi'), '').replace(/\s+/g, ' ').trim())
+        .filter(Boolean)
+    : [];
   // Dedupe (case-insensitive) and bound.
   const seen = new Set<string>();
   const out: string[] = [];
