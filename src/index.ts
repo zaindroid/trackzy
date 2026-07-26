@@ -32,8 +32,8 @@ async function main() {
   console.log(`[radar] crawling ${seeds.length} niches → ${config.ingestUrl}`);
   console.log(
     `[radar] niches: ${config.groqApiKey ? 'LLM (Groq)' : 'seeds.json'} · ` +
-      `sold data: ${config.apifyToken ? 'Apify enabled' : 'DISABLED (velocity=0)'} · ` +
-      `supplier: ${config.apifyToken ? `Apify (budget ${config.apifyMonthlyResultBudget}/mo)` : 'DISABLED (cache-only, misses→pending)'}`,
+      `demand: ${config.useApifySold && config.apifyToken ? 'Apify sold-velocity' : 'eBay Browse (free: competition + price)'} · ` +
+      `supplier: ${config.apifyToken ? `Apify (budget ${config.apifyMonthlyResultBudget}/mo)` : 'cache-only, misses→pending'}`,
   );
 
   // ── Phase 1: eBay demand + competition (the broad, free part) ──────────────
@@ -45,7 +45,9 @@ async function main() {
         console.warn(`[radar] no eBay active listings for "${niche}" — skipping`);
         continue;
       }
-      const sold = await fetchEbaySold(niche);
+      // Demand: free eBay Browse (competition + price) by default; real
+      // Apify sold-velocity only when explicitly enabled (USE_APIFY_SOLD).
+      const sold = config.useApifySold && config.apifyToken ? await fetchEbaySold(niche) : null;
       scored.push({ niche, active, sold });
     } catch (err) {
       console.error(`[radar] "${niche}" failed:`, err instanceof Error ? err.message : err);

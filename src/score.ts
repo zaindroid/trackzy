@@ -23,13 +23,25 @@ function opportunityScore(input: {
   sourceable: boolean;
   marginPercent: number;
 }): number {
-  const priceDollars = input.medianPriceCents / 100;
-  const priceScore = Math.min(priceDollars / 5, 20); // ~$100 caps the price component
-  const competitionScore = Math.max(0, 20 - input.activeCount / 200); // fewer competitors = better
-  const velocityScore = Math.min(input.salesPerDay * 4, 30); // strong weight on real demand
-  const strScore = Math.min(input.sellThroughPercent / 5, 15);
-  const marginScore = input.sourceable ? Math.min(Math.max(input.marginPercent, 0) / 5, 15) : 0;
-  return Math.round(priceScore + competitionScore + velocityScore + strScore + marginScore);
+  const p = input.medianPriceCents / 100;
+  // Price sweet spot for eBay dropshipping (cheap enough to impulse-buy, dear
+  // enough to profit): full marks $12-$80, partial $6-$150, little otherwise.
+  const priceScore = p >= 12 && p <= 80 ? 25 : p >= 6 && p <= 150 ? 15 : 5;
+
+  // Competition sweet spot from the free Browse API: a proven-but-not-saturated
+  // market scores best. Too few active listings = demand unproven; a flood =
+  // saturated/race-to-the-bottom.
+  const a = input.activeCount;
+  const competitionScore = a < 30 ? 8 : a <= 4000 ? 35 : Math.max(0, 35 - (a - 4000) / 500);
+
+  // Margin dominates for dropshipping — 66%+ nets the full 40.
+  const marginScore = input.sourceable ? Math.min(Math.max(input.marginPercent, 0) * 0.6, 40) : 0;
+
+  // Real confirmed-demand is only a BONUS now (usually 0, since sold-data via
+  // Apify is off by default) — it can't be the backbone without a free source.
+  const velocityBonus = Math.min(input.salesPerDay * 2, 15) + Math.min(input.sellThroughPercent / 10, 10);
+
+  return Math.round(Math.min(100, priceScore + competitionScore + marginScore + velocityBonus));
 }
 
 /** Combine the per-niche signals into a RadarItem for ingest. */

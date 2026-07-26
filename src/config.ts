@@ -21,10 +21,13 @@ export const config = {
   ingestUrl: required('RADAR_INGEST_URL'),
   ingestToken: required('RADAR_INGEST_TOKEN'),
 
-  // Optional: real confirmed-SOLD data via an Apify actor. Without it, velocity
-  // signals are 0 and ranking uses price + competition only.
   apifyToken: process.env.APIFY_TOKEN || undefined,
-  apifyEbaySoldActorId: process.env.APIFY_EBAY_SOLD_ACTOR_ID ?? 'caffein.dev~ebay-sold-listings',
+  apifyEbaySoldActorId: process.env.APIFY_EBAY_SOLD_ACTOR_ID || 'caffein.dev~ebay-sold-listings',
+  // Confirmed-SOLD velocity via Apify is OFF by default — the free Apify tier
+  // can't sustain it, so demand is derived from the free eBay Browse API
+  // (competition + price) instead. Set USE_APIFY_SOLD=true to re-enable real
+  // sold-velocity if you top up Apify or get Marketplace Insights approval.
+  useApifySold: (process.env.USE_APIFY_SOLD || 'false').toLowerCase() === 'true',
 
   // Optional: AliExpress Affiliate API (signed) for supplier cost/match. Without
   // it, products are marked not-sourceable (still useful as a demand radar).
