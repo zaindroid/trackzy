@@ -5,7 +5,7 @@ name: Radar crawl
 # the sourcing-portal /ingest/radar endpoint. See docs/RADAR_INGEST_CONTRACT.md.
 on:
   schedule:
-    - cron: '0 4 * * *' # daily 04:00 UTC
+    - cron: '0 4 * * 1' # weekly, Mondays 04:00 UTC (credit-safe on free Apify)
   workflow_dispatch: {}
 
 jobs:
@@ -28,6 +28,10 @@ jobs:
           EBAY_MARKETPLACE_ID: ${{ vars.EBAY_MARKETPLACE_ID }}
           RADAR_INGEST_URL: ${{ secrets.RADAR_INGEST_URL }}
           RADAR_INGEST_TOKEN: ${{ secrets.RADAR_INGEST_TOKEN }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_MODEL: ${{ vars.GROQ_MODEL }}
+          MAX_NICHES: ${{ vars.MAX_NICHES }}
+          SEED_THEMES: ${{ vars.SEED_THEMES }}
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           ALIEXPRESS_APP_KEY: ${{ secrets.ALIEXPRESS_APP_KEY }}
           ALIEXPRESS_APP_SECRET: ${{ secrets.ALIEXPRESS_APP_SECRET }}
