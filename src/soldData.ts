@@ -35,7 +35,9 @@ export async function fetchEbaySold(keyword: string): Promise<EbaySoldSignal | n
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ keywords: [keyword], count: 100 }),
+    // Keep the sold-data sample modest — this call isn't budget-capped, so it's
+    // the main recurring Apify cost. 50 is plenty for a median + velocity.
+    body: JSON.stringify({ keywords: [keyword], count: 50 }),
   });
   if (!res.ok) {
     console.warn(`[sold] Apify failed for "${keyword}": ${res.status} — continuing without sold data`);

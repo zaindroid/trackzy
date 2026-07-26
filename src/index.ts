@@ -1,4 +1,5 @@
 import { config, loadSeeds } from './config.js';
+import { generateNiches } from './seeds/llm.js';
 import { fetchEbayActive } from './ebay.js';
 import { fetchEbaySold } from './soldData.js';
 import { buildRadarItem } from './score.js';
@@ -15,10 +16,23 @@ interface Scored {
 }
 
 async function main() {
-  const seeds = loadSeeds();
+  // The LLM picks specific, high-opportunity niches each run; seeds.json is only
+  // a fallback when no Groq key is configured.
+  let seeds: string[] = [];
+  if (config.groqApiKey) {
+    try {
+      seeds = await generateNiches({ apiKey: config.groqApiKey, model: config.groqModel, count: config.maxNiches, themes: config.seedThemes });
+      console.log(`[radar] LLM proposed ${seeds.length} niches: ${seeds.join(' | ')}`);
+    } catch (err) {
+      console.warn('[radar] LLM niche generation failed, falling back to seeds.json:', err instanceof Error ? err.message : err);
+    }
+  }
+  if (seeds.length === 0) seeds = loadSeeds().slice(0, config.maxNiches);
+
   console.log(`[radar] crawling ${seeds.length} niches → ${config.ingestUrl}`);
   console.log(
-    `[radar] sold data: ${config.apifyToken ? 'Apify enabled' : 'DISABLED (velocity=0)'} · ` +
+    `[radar] niches: ${config.groqApiKey ? 'LLM (Groq)' : 'seeds.json'} · ` +
+      `sold data: ${config.apifyToken ? 'Apify enabled' : 'DISABLED (velocity=0)'} · ` +
       `supplier: ${config.apifyToken ? `Apify (budget ${config.apifyMonthlyResultBudget}/mo)` : 'DISABLED (cache-only, misses→pending)'}`,
   );
 

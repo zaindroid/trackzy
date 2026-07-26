@@ -38,6 +38,17 @@ export const config = {
   // How many active listings to sample per niche for price/competition.
   sampleLimit: Number(process.env.SAMPLE_LIMIT ?? '50'),
 
+  // ── LLM niche generation (Groq) — the crawler picks its own specific niches ──
+  // instead of a hand-maintained seed list. Absent key → falls back to seeds.json.
+  groqApiKey: process.env.GROQ_API_KEY || undefined,
+  groqModel: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
+  // How many niches the LLM proposes (and we crawl) per run. Bounded because
+  // each niche costs an (uncapped) eBay sold-data call — keep it modest on a
+  // free Apify account.
+  maxNiches: Number(process.env.MAX_NICHES || '6'),
+  // Optional broad areas to steer the LLM (comma-separated). Empty = open-ended.
+  seedThemes: (process.env.SEED_THEMES || '').split(',').map((s) => s.trim()).filter(Boolean),
+
   // ── Supplier-lookup credit discipline (see src/supplier/ + README) ──────────
   // The supplier module may be called with at most this many survivors per run.
   topNSurvivors: Number(process.env.TOP_N_SURVIVORS ?? '30'),

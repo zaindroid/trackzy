@@ -48,6 +48,20 @@ optionally `APIFY_TOKEN`, `ALIEXPRESS_APP_KEY`, `ALIEXPRESS_APP_SECRET`.
 
 The cron in `.github/workflows/crawl.yml` runs daily and can be triggered manually from the Actions tab.
 
+## Niche discovery — the LLM picks the seeds (`src/seeds/llm.ts`)
+
+Instead of a hand-maintained seed list, the crawler asks **Groq** to propose
+`MAX_NICHES` *specific, long-tail* product niches each run (e.g. "magnetic vent
+car phone mount", not "phone mount") — broad heads score badly on competition,
+so specificity is the main quality lever. Output varies run-to-run, so Radar
+keeps discovering fresh opportunities without you touching seeds. `SEED_THEMES`
+optionally steers it toward areas you care about. Without `GROQ_API_KEY` it
+falls back to `seeds.json`.
+
+Because each niche costs an (uncapped) eBay sold-data call, `MAX_NICHES`
+(default 6) bounds the per-run spend, sold-data sample size is kept small, and
+the cron defaults to **weekly** — see the credit strategy below.
+
 ## Supplier lookup — free-tier credit strategy (`src/supplier/`)
 
 AliExpress supplier cross-checks are the ONE place this crawler can spend money
