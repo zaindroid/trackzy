@@ -6,6 +6,7 @@ import { buildRadarItem } from './score.js';
 import { postToRadar } from './ingest.js';
 import { resolveSuppliers } from './supplier/lookup.js';
 import { ApifyAliexpressProvider } from './supplier/apifyProvider.js';
+import { AffiliateSupplierProvider } from './supplier/affiliateProvider.js';
 import { WorkerCacheClient } from './supplier/cacheClient.js';
 import type { EbayActiveSignal, EbaySoldSignal, RadarItem } from './types.js';
 
@@ -30,10 +31,11 @@ async function main() {
   if (seeds.length === 0) seeds = loadSeeds().slice(0, config.maxNiches);
 
   console.log(`[radar] crawling ${seeds.length} niches → ${config.ingestUrl}`);
+  const usingAffiliateForLog = !!(config.aliexpressAppKey && config.aliexpressAppSecret);
   console.log(
     `[radar] niches: ${config.groqApiKey ? 'LLM (Groq)' : 'seeds.json'} · ` +
       `demand: ${config.useApifySold && config.apifyToken ? 'Apify sold-velocity' : 'eBay Browse (free: competition + price)'} · ` +
-      `supplier: ${config.apifyToken ? `Apify (budget ${config.apifyMonthlyResultBudget}/mo)` : 'cache-only, misses→pending'}`,
+      `supplier: ${usingAffiliateForLog ? 'AliExpress Affiliate API (free)' : config.apifyToken ? `Apify (budget ${config.apifyMonthlyResultBudget}/mo)` : 'cache-only, misses→pending'}`,
   );
 
   // ── Phase 1: eBay demand + competition (the broad, free part) ──────────────
@@ -60,10 +62,16 @@ async function main() {
   const survivors = scored.slice(0, config.topNSurvivors);
 
   const cache = new WorkerCacheClient(config.ingestUrl, config.ingestToken);
-  const provider = new ApifyAliexpressProvider(config.apifyToken ?? '', config.apifyAliexpressActorId, config.supplierTimeoutMs);
-  // No Apify token → budget 0 so every cache miss defers to 'pending' and the
-  // provider is never actually called (cached hits from prior runs still resolve).
-  const monthlyBudget = config.apifyToken ? config.apifyMonthlyResultBudget : 0;
+  // Prefer OUR OWN AliExpress Affiliate API (signed, free, no Apify) when keys
+  // are configured; otherwise fall back to the Apify actor. Affiliate lookups
+  // report resultsConsumed=0, so the Apify monthly ceiling doesn't apply.
+  const usingAffiliate = !!(config.aliexpressAppKey && config.aliexpressAppSecret);
+  const provider = usingAffiliate
+    ? new AffiliateSupplierProvider(config.aliexpressAppKey!, config.aliexpressAppSecret!)
+    : new ApifyAliexpressProvider(config.apifyToken ?? '', config.apifyAliexpressActorId, config.supplierTimeoutMs);
+  // Affiliate → effectively unlimited (no per-result cost). Apify → the monthly
+  // result ceiling, or 0 (all misses pending) when there's no Apify token either.
+  const monthlyBudget = usingAffiliate ? Number.MAX_SAFE_INTEGER : config.apifyToken ? config.apifyMonthlyResultBudget : 0;
 
   const resolutions = await resolveSuppliers(
     survivors.map((s) => ({ id: s.niche, query: s.niche })),
