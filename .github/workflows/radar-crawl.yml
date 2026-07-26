@@ -1,0 +1,34 @@
+name: Radar crawl
+
+# Lives on the default branch (required for GitHub cron) but runs the crawler
+# CODE from the `zcrawler` branch. Populates the Product Radar tab by POSTing to
+# the sourcing-portal /ingest/radar endpoint. See docs/RADAR_INGEST_CONTRACT.md.
+on:
+  schedule:
+    - cron: '0 4 * * *' # daily 04:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zcrawler # the crawler code lives here
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - run: npm run crawl
+        env:
+          EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
+          EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
+          EBAY_API_BASE: ${{ vars.EBAY_API_BASE }}
+          EBAY_MARKETPLACE_ID: ${{ vars.EBAY_MARKETPLACE_ID }}
+          RADAR_INGEST_URL: ${{ secrets.RADAR_INGEST_URL }}
+          RADAR_INGEST_TOKEN: ${{ secrets.RADAR_INGEST_TOKEN }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          ALIEXPRESS_APP_KEY: ${{ secrets.ALIEXPRESS_APP_KEY }}
+          ALIEXPRESS_APP_SECRET: ${{ secrets.ALIEXPRESS_APP_SECRET }}
+          SEEDS: ${{ vars.SEEDS }}
