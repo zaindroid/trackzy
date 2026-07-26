@@ -36,6 +36,55 @@
       "when": 1784823868666,
       "tag": "0004_hot_thundra",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1784977450539,
+      "tag": "0005_oval_siren",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1784996169213,
+      "tag": "0006_chubby_ben_urich",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1785002202485,
+      "tag": "0007_tan_nitro",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1785022646607,
+      "tag": "0008_yielding_tombstone",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1785023605413,
+      "tag": "0009_robust_stellaris",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1785027809894,
+      "tag": "0010_parched_thunderbird",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1785054535839,
+      "tag": "0011_lean_star_brand",
+      "breakpoints": true
     }
   ]
 }

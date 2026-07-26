@@ -4,7 +4,7 @@ import { RealSessionVerifier } from './real.js';
 import { MockSessionVerifier } from './mock.js';
 
 export * from './iface.js';
-export { RealSessionVerifier } from './real.js';
+export { RealSessionVerifier, fetchClerkUserEmail } from './real.js';
 export { MockSessionVerifier } from './mock.js';
 
 export function createSessionVerifier(env: ClerkEnv): SessionVerifier {

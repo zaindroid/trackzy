@@ -38,6 +38,8 @@ const SEED_METRICS = {
   autoExtractedRegexPercent: 80,
   autoExtractedGeminiPercent: 20,
   exceptionsOpen: 1,
+  listingsTotal: 6,
+  listingsMatched: 4,
 };
 
 beforeEach(() => {
@@ -73,5 +75,11 @@ describe('OrdersPage', () => {
     await waitFor(() => expect(screen.getByText('Orders today')).toBeInTheDocument());
     expect(screen.getByText('2')).toBeInTheDocument();
     expect(screen.getByText('1')).toBeInTheDocument(); // exceptions open
+  });
+
+  it('links the "Listings" tile to the Listings page, showing the matched/total count', async () => {
+    renderWithProviders(<OrdersPage />);
+    await waitFor(() => expect(screen.getByText('4/6 matched')).toBeInTheDocument());
+    expect(screen.getByText('4/6 matched').closest('a')).toHaveAttribute('href', '/listings');
   });
 });

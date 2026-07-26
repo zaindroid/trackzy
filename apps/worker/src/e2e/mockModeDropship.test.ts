@@ -189,14 +189,14 @@ describe('MOCK_MODE end-to-end: eBay + manual Amazon Retail supplier dropship fl
       .where(eq(webhookEvents.dedupKey, 'gmail:gmail-mock-amazon-1'));
     expect(gmailEvent?.error).toBeNull();
 
-    // --- 5. Tracking Conversion Middleware: TBA -> proxied Bluecare Express number (milestone 7) ---
+    // --- 5. Tracking Conversion Middleware: TBA -> proxied TrackCaptain number (milestone 7) ---
     const ebay = new MockEbayOrderSource(true); // non_api_mode -> pushTracking throws NonApiModeError
     const pushResult = await pushTrackingWithProxy(env, ebay, FULFILLMENT_ID);
     expect(pushResult).toEqual({ pushed: false, proxied: true });
 
     const [proxyEvent] = await db.select().from(trackingEvents).where(eq(trackingEvents.fulfillmentId, FULFILLMENT_ID));
     expect(proxyEvent?.originalTracking).toBe('TBA123456789012');
-    expect(proxyEvent?.proxyTracking).toMatch(/^BCE[0-9A-F]{10}$/);
+    expect(proxyEvent?.proxyTracking).toMatch(/^TT[0-9A-F]{10}$/);
 
     const [afterProxy] = await db.select().from(fulfillments).where(eq(fulfillments.id, FULFILLMENT_ID));
     expect(afterProxy?.pushedToStorefront).toBe(0); // API push was skipped (non-API mode); extension completes it below
@@ -207,7 +207,7 @@ describe('MOCK_MODE end-to-end: eBay + manual Amazon Retail supplier dropship fl
     const upload = uploadsBody.uploads.find((u) => u.fulfillmentId === FULFILLMENT_ID);
     expect(upload?.trackingNumber).toBe(proxyEvent?.proxyTracking);
     expect(upload?.trackingNumber).not.toBe('TBA123456789012');
-    expect(upload?.carrier).toBe('bluecare_express');
+    expect(upload?.carrier).toBe('UPS');
 
     const completeRes = await SELF.fetch(
       `https://worker.example.com/api/extension/pending-tracking-uploads/${FULFILLMENT_ID}/complete`,

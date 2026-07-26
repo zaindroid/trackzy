@@ -64,7 +64,12 @@ ENVIRONMENT = "production"
 name = "DISPUTE_EMAIL"
 
 # Gmail inbox polling (spec 6b, every 5 min) + hourly repricing/stock-sync
-# sweep (spec section 10). Keep in sync with apps/worker/src/scheduled.ts's
-# GMAIL_POLL_CRON / REPRICING_SWEEP_CRON constants.
+# sweep (spec section 10) + eBay/Amazon order polling (every 10 min — these
+# marketplaces only offer polling, unlike Shopify's webhook push) + AliExpress
+# session keepalive (every 12h — AliExpress's refresh-token window doesn't
+# extend on use, so an idle connection needs a periodic nudge regardless of
+# order activity). Keep in sync with apps/worker/src/scheduled.ts's
+# GMAIL_POLL_CRON / REPRICING_SWEEP_CRON / MARKETPLACE_POLL_CRON /
+# ALIEXPRESS_KEEPALIVE_CRON constants.
 [triggers]
-crons = ["*/5 * * * *", "0 * * * *"]
+crons = ["*/5 * * * *", "0 * * * *", "*/10 * * * *", "0 */12 * * *", "*/2 * * * *"]

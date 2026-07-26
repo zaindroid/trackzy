@@ -10,6 +10,10 @@ import metrics from './metrics.js';
 import manualTasks from './manualTasks.js';
 import extension from './extension.js';
 import listings from './listings.js';
+import connections from './connections.js';
+import storefronts from './storefronts.js';
+import pendingSupplierOrders from './pendingSupplierOrders.js';
+import productOpportunities from './productOpportunities.js';
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVariables }>();
 
@@ -26,5 +30,9 @@ app.route('/metrics', metrics);
 app.route('/manual-tasks', manualTasks);
 app.route('/extension', extension);
 app.route('/listings', listings);
+app.route('/connections', connections);
+app.route('/storefronts', storefronts);
+app.route('/pending-supplier-orders', pendingSupplierOrders);
+app.route('/product-opportunities', productOpportunities);
 
 export default app;

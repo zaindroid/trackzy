@@ -197,6 +197,110 @@ describe('GET /api/extension/pending-tracking-uploads', () => {
     const noProxy = body.uploads.find((u) => u.fulfillmentId === 'ff_ext_no_proxy');
     expect(noProxy?.trackingNumber).toBe('70123456789012345674'); // no tracking_events row -> unchanged passthrough
   });
+
+  it('excludes a proxy-needed fulfillment (AMZL/AliExpress-style carrier) that has no proxy conversion recorded yet — must never leak the raw number', async () => {
+    const db = createDb(env.DB);
+    await db.insert(fulfillments).values({
+      id: 'ff_ext_awaiting_proxy',
+      orderId: 'ord_ext_nonapi',
+      supplierId: 'sup_ext',
+      costCents: 900,
+      trackingNumber: 'YT2345678901234', // unrecognized carrier -> carrierFinal null, e.g. AliExpress/Temu
+      carrierDeclared: null,
+      carrierDetected: null,
+      carrierFinal: null,
+      trackingStatus: 'needs_review',
+      pushedToStorefront: 0,
+      source: 'supplier_api',
+      createdAt: 0,
+      updatedAt: 0,
+    });
+
+    const res = await SELF.fetch('https://worker.example.com/api/extension/pending-tracking-uploads', { headers: AUTH_HEADERS });
+    const body = (await res.json()) as { uploads: { fulfillmentId: string }[] };
+    expect(body.uploads.find((u) => u.fulfillmentId === 'ff_ext_awaiting_proxy')).toBeUndefined();
+  });
+});
+
+describe('GET /api/extension/pending-tracking-proxy-conversions', () => {
+  it('lists a proxy-needed fulfillment with no conversion yet, and excludes an already-converted one', async () => {
+    const db = createDb(env.DB);
+    await db.insert(fulfillments).values({
+      id: 'ff_ext_needs_claim',
+      orderId: 'ord_ext_nonapi',
+      supplierId: 'sup_ext',
+      costCents: 900,
+      trackingNumber: 'YT2345678901234',
+      carrierDeclared: null,
+      carrierDetected: null,
+      carrierFinal: null,
+      trackingStatus: 'needs_review',
+      pushedToStorefront: 0,
+      source: 'supplier_api',
+      createdAt: 0,
+      updatedAt: 0,
+    });
+
+    const res = await SELF.fetch('https://worker.example.com/api/extension/pending-tracking-proxy-conversions', { headers: AUTH_HEADERS });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { conversions: { fulfillmentId: string; originalTrackingNumber: string }[] };
+    const ids = body.conversions.map((c) => c.fulfillmentId);
+    expect(ids).toContain('ff_ext_needs_claim');
+    expect(ids).not.toContain('ff_ext_pending_upload'); // already has a proxied event recorded (see seed)
+    const needsClaim = body.conversions.find((c) => c.fulfillmentId === 'ff_ext_needs_claim');
+    expect(needsClaim?.originalTrackingNumber).toBe('YT2345678901234');
+  });
+});
+
+describe('POST /api/extension/pending-tracking-proxy-conversions/:id/complete', () => {
+  it('records the claimed number and moves the fulfillment into pending-tracking-uploads', async () => {
+    const db = createDb(env.DB);
+    await db.insert(fulfillments).values({
+      id: 'ff_ext_claim_complete',
+      orderId: 'ord_ext_nonapi',
+      supplierId: 'sup_ext',
+      costCents: 900,
+      trackingNumber: 'YT9999999999999',
+      carrierDeclared: null,
+      carrierDetected: null,
+      carrierFinal: null,
+      trackingStatus: 'needs_review',
+      pushedToStorefront: 0,
+      source: 'supplier_api',
+      createdAt: 0,
+      updatedAt: 0,
+    });
+
+    const completeRes = await SELF.fetch(
+      'https://worker.example.com/api/extension/pending-tracking-proxy-conversions/ff_ext_claim_complete/complete',
+      {
+        method: 'POST',
+        headers: AUTH_HEADERS,
+        body: JSON.stringify({ trackingNumber: '9400111899223197428490', carrier: 'USPS' }),
+      },
+    );
+    expect(completeRes.status).toBe(200);
+
+    const conversionsRes = await SELF.fetch('https://worker.example.com/api/extension/pending-tracking-proxy-conversions', {
+      headers: AUTH_HEADERS,
+    });
+    const conversionsBody = (await conversionsRes.json()) as { conversions: { fulfillmentId: string }[] };
+    expect(conversionsBody.conversions.find((c) => c.fulfillmentId === 'ff_ext_claim_complete')).toBeUndefined();
+
+    const uploadsRes = await SELF.fetch('https://worker.example.com/api/extension/pending-tracking-uploads', { headers: AUTH_HEADERS });
+    const uploadsBody = (await uploadsRes.json()) as { uploads: { fulfillmentId: string; trackingNumber: string; carrier: string }[] };
+    const upload = uploadsBody.uploads.find((u) => u.fulfillmentId === 'ff_ext_claim_complete');
+    expect(upload?.trackingNumber).toBe('9400111899223197428490');
+    expect(upload?.carrier).toBe('USPS');
+  });
+
+  it('404s for a fulfillment that does not belong to the authed user', async () => {
+    const res = await SELF.fetch(
+      'https://worker.example.com/api/extension/pending-tracking-proxy-conversions/does-not-exist/complete',
+      { method: 'POST', headers: AUTH_HEADERS, body: JSON.stringify({ trackingNumber: 'X', carrier: 'USPS' }) },
+    );
+    expect(res.status).toBe(404);
+  });
 });
 
 describe('POST /api/extension/pending-tracking-uploads/:id/complete', () => {

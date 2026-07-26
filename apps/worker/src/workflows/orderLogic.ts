@@ -17,6 +17,7 @@ import { createShopifyClient } from '@fulfillment-tracker/adapters/shopify';
 import type { Env } from '../env.js';
 import { newId, now } from '../lib/id.js';
 import { draftDispute } from '../lib/draftDispute.js';
+import { placeSupplierOrder } from '../lib/placeSupplierOrder.js';
 import type { TrackingReceivedEvent } from './types.js';
 
 const MAX_TRACKING_TIMEOUT_RETRIES = 3; // initial wait + up to 2 more, per spec section 7 step 4
@@ -175,37 +176,15 @@ export async function placeSupplierOrderStep(
   supplierId: string,
   supplierCostCents: number,
 ): Promise<string> {
-  const [order] = await db.select().from(orders).where(eq(orders.id, orderId));
-  if (!order) throw new Error(`Order ${orderId} not found`);
-  const [supplier] = await db.select().from(suppliers).where(eq(suppliers.id, supplierId));
-  if (!supplier) throw new Error(`Supplier ${supplierId} not found`);
-  const lineItems = await db.select().from(orderLineItems).where(eq(orderLineItems.orderId, orderId));
-
-  const supplierClient = createSupplierClient(env);
-  await supplierClient.createOrder(supplier.apiBaseUrl, {
-    externalOrderRef: order.externalOrderNumber,
-    lineItems: lineItems.map((li) => ({ sku: li.sku, quantity: li.quantity })),
-  });
-
-  const fulfillmentId = newId();
-  await db.insert(fulfillments).values({
-    id: fulfillmentId,
-    orderId,
-    supplierId,
-    costCents: supplierCostCents,
-    trackingNumber: null,
-    carrierDeclared: null,
-    carrierDetected: null,
-    carrierFinal: null,
-    trackingStatus: 'pending',
-    pushedToStorefront: 0,
-    source: 'supplier_api',
-    createdAt: now(),
-    updatedAt: now(),
-  });
-
+  // Delegates to the shared, kind-aware helper (apps/worker/src/lib/placeSupplierOrder.ts)
+  // — a 'manual' supplier now creates a manual_tasks row instead of this
+  // step calling SupplierClient.createOrder against an empty apiBaseUrl. No
+  // shipTo is threaded through here: Shopify itself owns the buyer's
+  // shipping label, so a Shopify-sourced manual task simply won't have a
+  // paste-able address — unlike the eBay/marketplace pipeline, which passes
+  // OrderSourceOrder.shipTo through explicitly. See DECISIONS.md.
+  const fulfillmentId = await placeSupplierOrder(db, env, orderId, supplierId, supplierCostCents);
   await db.update(orders).set({ status: 'fulfilling', updatedAt: now() }).where(eq(orders.id, orderId));
-
   return fulfillmentId;
 }
 

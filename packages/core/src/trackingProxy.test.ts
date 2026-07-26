@@ -15,8 +15,12 @@ describe('shouldRouteThroughTrackingProxy', () => {
     expect(shouldRouteThroughTrackingProxy('AMZL', 'shopify')).toBe(false);
   });
 
-  it('does not proxy when the carrier is unknown (null)', () => {
-    expect(shouldRouteThroughTrackingProxy(null, 'ebay')).toBe(false);
+  it('proxies an unrecognized carrier (null) for an eBay destination — covers AliExpress/Temu suppliers, whose carriers (Cainiao, YunExpress, ...) always detect as null', () => {
+    expect(shouldRouteThroughTrackingProxy(null, 'ebay')).toBe(true);
+  });
+
+  it('does not proxy an unrecognized carrier for a non-eBay destination', () => {
+    expect(shouldRouteThroughTrackingProxy(null, 'amazon')).toBe(false);
   });
 
   it.each(['UPS', 'FEDEX', 'DHL'] as const)('does not proxy %s even for an eBay destination', (carrier) => {

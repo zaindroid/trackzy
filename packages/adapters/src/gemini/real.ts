@@ -10,8 +10,17 @@ import type {
   GeminiListingMatchResult,
   GeminiTitleSuggestionInput,
   GeminiTitleSuggestionResult,
+  OpportunityAnalysisInput,
+  OpportunityAnalysisResult,
+  RefineKeywordsInput,
 } from './iface.js';
 
+// Standard (non-Gemini-flavored) JSON Schema, per Groq's OpenAI-compatible
+// Structured Outputs — `type` unions for nullability plus `additionalProperties:
+// false` and every property listed in `required`, matching OpenAI's strict
+// schema mode Groq mirrors. TODO(HUMAN): this exact enforcement shape is
+// unverified against a live Groq account; if a call ever throws a schema
+// validation error, this is the first thing to check.
 const TRACKING_EXCEPTION_SCHEMA = {
   type: 'object',
   properties: {
@@ -19,18 +28,20 @@ const TRACKING_EXCEPTION_SCHEMA = {
     isStuckOrLost: { type: 'boolean' },
   },
   required: ['category', 'isStuckOrLost'],
+  additionalProperties: false,
 };
 
 const EXTRACT_SCHEMA = {
   type: 'object',
   properties: {
-    trackingNumber: { type: 'string', nullable: true },
-    carrierDeclared: { type: 'string', enum: ['UPS', 'USPS', 'FEDEX', 'DHL'], nullable: true },
-    externalOrderRef: { type: 'string', nullable: true },
-    sku: { type: 'string', nullable: true },
+    trackingNumber: { type: ['string', 'null'] },
+    carrierDeclared: { type: ['string', 'null'], enum: ['UPS', 'USPS', 'FEDEX', 'DHL', null] },
+    externalOrderRef: { type: ['string', 'null'] },
+    sku: { type: ['string', 'null'] },
     confidence: { type: 'number' },
   },
-  required: ['confidence'],
+  required: ['trackingNumber', 'carrierDeclared', 'externalOrderRef', 'sku', 'confidence'],
+  additionalProperties: false,
 };
 
 const DISPUTE_SCHEMA = {
@@ -40,6 +51,7 @@ const DISPUTE_SCHEMA = {
     body: { type: 'string' },
   },
   required: ['subject', 'body'],
+  additionalProperties: false,
 };
 
 const TITLE_SUGGESTION_SCHEMA = {
@@ -49,47 +61,89 @@ const TITLE_SUGGESTION_SCHEMA = {
     reasoning: { type: 'string' },
   },
   required: ['suggestedTitle', 'reasoning'],
+  additionalProperties: false,
+};
+
+const REFINE_KEYWORDS_SCHEMA = {
+  type: 'object',
+  properties: {
+    keywords: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 8 },
+  },
+  required: ['keywords'],
+  additionalProperties: false,
+};
+
+const OPPORTUNITY_ANALYSIS_SCHEMA = {
+  type: 'object',
+  properties: {
+    verdict: { type: 'string' },
+    sellPriceMinCents: { type: 'integer' },
+    sellPriceMaxCents: { type: 'integer' },
+    targetSourcePriceCents: { type: 'integer' },
+    marginEstimateCents: { type: 'integer' },
+    risk: { type: 'string' },
+    recommendedKeywords: { type: 'array', items: { type: 'string' }, minItems: 0, maxItems: 5 },
+  },
+  required: [
+    'verdict',
+    'sellPriceMinCents',
+    'sellPriceMaxCents',
+    'targetSourcePriceCents',
+    'marginEstimateCents',
+    'risk',
+    'recommendedKeywords',
+  ],
+  additionalProperties: false,
 };
 
 function listingMatchSchema(candidateIds: string[]) {
   return {
     type: 'object',
     properties: {
-      // Gemini's structured output enums must be non-empty; a "none" sentinel
-      // keeps the schema valid even when the caller passes zero candidates.
+      // Structured-output enums must be non-empty; a "none" sentinel keeps
+      // the schema valid even when the caller passes zero candidates.
       chosenId: { type: 'string', enum: [...candidateIds, 'none'] },
       confidence: { type: 'number' },
     },
     required: ['chosenId', 'confidence'],
+    additionalProperties: false,
   };
 }
 
 export class RealGeminiExtractor implements GeminiExtractor {
   constructor(private readonly env: GeminiEnv) {}
 
-  private async generate<T>(prompt: string, responseSchema: object): Promise<T> {
-    const model = this.env.GEMINI_MODEL ?? 'gemini-flash-latest';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.env.GEMINI_API_KEY ?? ''}`;
-    const res = await fetch(url, {
+  /**
+   * Every chat/JSON call site runs through Groq's OpenAI-compatible chat
+   * completions endpoint (see iface.ts docstring for why this moved off
+   * Gemini). `schemaName` is required by Groq/OpenAI's structured-output
+   * request shape (`response_format.json_schema.name`) but never inspected
+   * by the caller.
+   */
+  private async generate<T>(prompt: string, schemaName: string, responseSchema: object): Promise<T> {
+    const model = this.env.GROQ_MODEL ?? 'openai/gpt-oss-120b';
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.env.GROQ_API_KEY ?? ''}`,
+      },
       body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema,
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        response_format: {
+          type: 'json_schema',
+          json_schema: { name: schemaName, schema: responseSchema, strict: true },
         },
       }),
     });
     if (!res.ok) {
-      throw new Error(`Gemini request failed: ${res.status} ${await res.text()}`);
+      throw new Error(`Groq request failed: ${res.status} ${await res.text()}`);
     }
-    const json = (await res.json()) as {
-      candidates?: { content: { parts: { text: string }[] } }[];
-    };
-    const text = json.candidates?.[0]?.content.parts[0]?.text;
+    const json = (await res.json()) as { choices?: { message: { content: string } }[] };
+    const text = json.choices?.[0]?.message.content;
     if (!text) {
-      throw new Error('Gemini response missing structured output');
+      throw new Error('Groq response missing structured output');
     }
     return JSON.parse(text) as T;
   }
@@ -111,7 +165,7 @@ export class RealGeminiExtractor implements GeminiExtractor {
       externalOrderRef?: string | null;
       sku?: string | null;
       confidence: number;
-    }>(prompt, EXTRACT_SCHEMA);
+    }>(prompt, 'tracking_extraction', EXTRACT_SCHEMA);
 
     if (!result.trackingNumber) {
       return { candidate: null, confidence: result.confidence };
@@ -141,11 +195,17 @@ export class RealGeminiExtractor implements GeminiExtractor {
       .filter(Boolean)
       .join('\n');
 
-    return this.generate<GeminiDisputeResult>(prompt, DISPUTE_SCHEMA);
+    return this.generate<GeminiDisputeResult>(prompt, 'dispute_draft', DISPUTE_SCHEMA);
   }
 
   async embedText(text: string): Promise<number[]> {
-    const model = this.env.GEMINI_EMBEDDING_MODEL ?? 'text-embedding-004';
+    // Still Gemini — Groq has no embeddings API at all (see iface.ts
+    // docstring). `text-embedding-004` was retired by Google on 2026-01-14
+    // (confirmed live: every embedText call was 404ing against a real
+    // account, breaking the listing-match cascade's embedding step — see
+    // DECISIONS.md). `gemini-embedding-001` is Google's current
+    // replacement, same `embedContent` request/response shape.
+    const model = this.env.GEMINI_EMBEDDING_MODEL ?? 'gemini-embedding-001';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:embedContent?key=${this.env.GEMINI_API_KEY ?? ''}`;
     const res = await fetch(url, {
       method: 'POST',
@@ -179,6 +239,7 @@ export class RealGeminiExtractor implements GeminiExtractor {
 
     const result = await this.generate<{ chosenId: string; confidence: number }>(
       prompt,
+      'listing_match',
       listingMatchSchema(input.candidates.map((c) => c.id)),
     );
     return { chosenId: result.chosenId === 'none' ? null : result.chosenId, confidence: result.confidence };
@@ -201,7 +262,7 @@ export class RealGeminiExtractor implements GeminiExtractor {
       'Also indicate whether this specifically looks stuck or lost (warranting a carrier claim).',
     ].join('\n');
 
-    return this.generate<ClassifyTrackingExceptionResult>(prompt, TRACKING_EXCEPTION_SCHEMA);
+    return this.generate<ClassifyTrackingExceptionResult>(prompt, 'tracking_exception_classification', TRACKING_EXCEPTION_SCHEMA);
   }
 
   /**
@@ -225,6 +286,62 @@ export class RealGeminiExtractor implements GeminiExtractor {
       .filter(Boolean)
       .join('\n');
 
-    return this.generate<GeminiTitleSuggestionResult>(prompt, TITLE_SUGGESTION_SCHEMA);
+    return this.generate<GeminiTitleSuggestionResult>(prompt, 'title_suggestion', TITLE_SUGGESTION_SCHEMA);
+  }
+
+  /**
+   * Product-discovery "deep search" step (see DECISIONS.md): when a scanned
+   * keyword's opportunity score is below the caller's threshold, generates
+   * more specific sub-keywords to try instead — the same idea as the
+   * original tool's Ollama-powered keyword refinement, ported to Groq.
+   */
+  async suggestRefinedKeywords(input: RefineKeywordsInput): Promise<string[]> {
+    const prompt = [
+      'A dropshipper is researching whether a product keyword is worth listing on eBay.',
+      `Seed keyword: "${input.seedKeyword}"`,
+      `Its current opportunity score is ${input.currentScore}/100 (higher is better) — too low to be worth listing as-is.`,
+      input.sampleTitles.length ? `Sample sold listing titles found for this keyword:\n${input.sampleTitles.map((t) => `- ${t}`).join('\n')}` : '',
+      'Suggest 5-8 more specific, narrower sub-keywords (e.g. adding a material, size, use-case, or',
+      'bundle angle) that might reveal a better niche within this broader product category — the kind',
+      'a real seller would search for, not generic marketing phrases.',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const result = await this.generate<{ keywords: string[] }>(prompt, 'refined_keywords', REFINE_KEYWORDS_SCHEMA);
+    return result.keywords;
+  }
+
+  /**
+   * Product-discovery final analysis (see DECISIONS.md): a human-readable
+   * verdict on the winning keyword from a deep search — never auto-acted on,
+   * purely advisory copy for a human deciding whether to actually source and
+   * list the product.
+   */
+  async analyzeOpportunity(input: OpportunityAnalysisInput): Promise<OpportunityAnalysisResult> {
+    const prompt = [
+      'Analyze this eBay product-research scan for a dropshipper deciding whether to list it.',
+      `Keyword: ${input.keyword}`,
+      `Average sold price: $${(input.avgPriceCents / 100).toFixed(2)}`,
+      `Confirmed sales found: ${input.totalSold}`,
+      `Unique competing sellers: ${input.uniqueSellers}`,
+      `Free shipping prevalence: ${input.freeShippingPercent}%`,
+      'Give a short verdict (worth listing? why/why not), a realistic sell-price range, a target',
+      'sourcing price that would leave a reasonable margin, an estimated margin, a one-line risk note',
+      '(competition, price volatility, seasonality, etc.), and up to 5 more specific next keywords worth',
+      'researching. Report every price/margin figure in US cents (e.g. $19.99 is 1999), matching the',
+      'field names ending in "Cents" — never dollars.',
+    ].join('\n');
+
+    const result = await this.generate<{
+      verdict: string;
+      sellPriceMinCents: number;
+      sellPriceMaxCents: number;
+      targetSourcePriceCents: number;
+      marginEstimateCents: number;
+      risk: string;
+      recommendedKeywords: string[];
+    }>(prompt, 'opportunity_analysis', OPPORTUNITY_ANALYSIS_SCHEMA);
+    return result;
   }
 }

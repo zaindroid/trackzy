@@ -1219,3 +1219,794 @@ deferring further, given real production order/fulfillment data was on the line.
   data, with the honest framing that even with a backup and thorough local validation, this class of
   operation deserves an explicit go-ahead rather than being executed unilaterally under a general
   "extend the app" mandate.
+
+## eBay Marketplace Account Deletion notification: built the real endpoint, not the exemption
+
+eBay disables a Production keyset until this requirement is satisfied, either via an exemption claim or
+a working notification endpoint. Checked whether the exemption was honestly available before reaching
+for it: `packages/adapters/src/orderSource/iface.ts`'s `OrderSourceOrder.shipTo`/`buyerName` genuinely
+flow into `manual_tasks.payload_json` for eBay storefronts (the Buy Queue / extension paste-address
+flow) — real eBay buyer PII is stored, so claiming otherwise to eBay would not be accurate. Built
+`apps/worker/src/routes/webhooks.ebay-deletion.ts` instead:
+- GET implements eBay's documented ownership-verification handshake
+  (`sha256Hex(challengeCode + verificationToken + endpointUrl)`), using the incoming request's own
+  `origin + pathname` as `endpointUrl` rather than a separately configured var, since that's
+  necessarily identical to whatever URL eBay was configured to call.
+- POST redacts the deleted buyer's `buyerName`/`shipTo` out of any `manual_tasks` row scoped to an eBay
+  storefront (the only table this system's schema stores eBay buyer PII in — `orders`/
+  `order_line_items` never do) and always acks 200, since eBay retries on non-200/timeout and a thrown
+  error here would cause repeated retries for no benefit.
+- Did not log these notifications into `webhook_events` — its `source` column CHECK constraint is fixed
+  to `('shopify', '17track', 'email')`, and widening it would mean repeating the full cascading-rebuild
+  procedure from the "Platform CHECK constraint finally widened" entry above for a notification stream
+  that doesn't need deduplication (each is a one-time redaction keyed by username, safely idempotent to
+  repeat) or an audit trail beyond what eBay's own portal already retains.
+- `EBAY_DELETION_VERIFICATION_TOKEN` is a self-chosen shared secret (not eBay-issued), generated once
+  and handed to the user directly to register in the eBay Developer Portal alongside the endpoint URL —
+  see DEPLOY.md section 8b.
+- **Confirmed live (2026-07)**: registering the endpoint passed eBay's ownership-verification GET on
+  the first try (portal showed "Marketplace account deletion notification endpoint settings
+  successfully saved" and the keyset's compliance banner cleared). Used eBay's "Send Test Notification"
+  button plus a temporary `console.log` of the raw POST body (removed immediately after, via
+  `wrangler tail`) to confirm the real payload shape matches what the handler assumed —
+  `notification.data.username` is exactly right, no code change needed. One portal quirk worth noting
+  for anyone hitting this again: the endpoint URL/verification token/test-notification fields stay
+  greyed out on the Alerts & Notifications tab until OAuth is enabled for the keyset (a separate
+  one-time step, unrelated to the notify-on-failure email field above it, which is *not* what unlocks
+  the form despite being the more obvious first guess).
+
+## Marketplace order pipeline: eBay polling, manual-supplier fulfillment, and tracking-proxy manual claim (built end-to-end)
+
+Started as "integrate TrackCaptain for fake tracking," but tracing the actual call path surfaced that
+the pieces it would plug into didn't exist yet. Rather than bolt TrackCaptain onto dead code, traced
+and fixed the whole chain — eBay orders had no automated ingestion, manual suppliers had no producer
+for `manual_tasks`, and the two originally-spec'd tracking-proxy providers turned out to be dead.
+
+- **Bluecare Express and Aquiline are both blocked by eBay** (researched live, mid-2026): eBay removed
+  both from its accepted carrier list (Bluecare: mid-2024 announcement, actively enforced through
+  2025–2026; Aquiline: same crackdown). Their `real.ts` adapters are now marked DEAD PROVIDER in their
+  own doc comments and never called from production code — `pushTrackingWithProxy` only reaches
+  `createTrackingProxyClient` in `MOCK_MODE='true'` (checked directly, not via the shared `isMockMode`
+  per-adapter helper — see the next bullet for why that distinction mattered). Researched replacements
+  (TrackCaptain, Traktako, Qtrack-via-AutoDS) and confirmed none currently offer a real API — all three
+  are manual web-dashboard claim tools. Built the human-in-the-loop path instead: a fulfillment needing
+  proxy conversion gets recorded pending and never pushed un-proxied; the extension's new
+  `pending-tracking-proxy-conversions` queue (content script on trackcaptain.com) lets a human claim a
+  number and submit it, which immediately attempts the real marketplace push.
+- **Caught a real bug before it shipped**: first attempt gated the mock-vs-real proxy branch on the
+  shared `isMockMode(env.MOCK_MODE, env.BLUECARE_EXPRESS_API_KEY, env.AQUILINE_API_KEY)` helper, same
+  pattern every other adapter in this codebase uses. But that helper treats "provider key merely unset"
+  as equivalent to "we're in mock mode" — and since neither Bluecare nor Aquiline will ever have a real
+  key configured again (both are permanently dead), that check would silently evaluate true in actual
+  production too, generating fake `BCE...` tracking numbers and pushing them to real eBay orders. A
+  test written to simulate real-mode conditions (`MOCK_MODE='false'`, no provider keys) caught this
+  immediately — the fix checks `env.MOCK_MODE === 'true'` directly for this one decision, bypassing the
+  per-adapter helper entirely, since it's the only signal that's still authoritative here.
+- **Broadened `shouldRouteThroughTrackingProxy`** (`packages/core/src/trackingProxy.ts`) from
+  "AMZL only" to "any carrier eBay doesn't natively recognize" (i.e. not UPS/USPS/FEDEX/DHL). AliExpress
+  and Temu's own carriers (Cainiao, YunExpress, 4PX, ...) aren't in this codebase's `Carrier` enum at
+  all and always detect as `null` — previously that meant *no* proxying and a raw unrecognized number
+  reaching eBay; now it correctly routes through the same proxy queue as Amazon Logistics.
+- **Found and fixed a second latent bug** while building the new proxy-conversion queue: the existing
+  `pending-tracking-uploads` endpoint had no gate for "still awaiting proxy conversion" — a fulfillment
+  needing a proxy number but not yet converted would have surfaced with its *raw* tracking number
+  (falling back via `latestEvent?.proxyTracking ?? f.trackingNumber`), exactly the hard-rule violation
+  the whole system exists to prevent. Fixed by excluding any fulfillment that
+  `shouldRouteThroughTrackingProxy` says needs conversion but has no recorded conversion yet.
+- **`manual_tasks` had zero production producers before this session** — a fully-built consumer (Buy
+  Queue dashboard, extension paste-address flow, claim/mark-ordered/abandon lifecycle) with nothing
+  ever inserting a row. `placeSupplierOrderStep` (the only call site that creates a `fulfillments` shell
+  for a chosen supplier) unconditionally called `SupplierClient.createOrder` regardless of
+  `supplier.kind`, which for a `'manual'` supplier (Amazon Retail, AliExpress, Temu) means calling a
+  REST API against an empty `apiBaseUrl`. Extracted the fix into a shared, kind-aware
+  `apps/worker/src/lib/placeSupplierOrder.ts` — `'api'` unchanged, `'manual'` now creates a
+  `manual_tasks` row (payload includes `shipTo`/`buyerName`/`lineItems`) — reused by both the existing
+  Shopify workflow and the new marketplace pipeline, rather than fixing it in only one place.
+- **eBay/Amazon order ingestion had no scheduled trigger at all.** `OrderSource.listNewOrders()` was
+  fully implemented (both marketplaces) but nothing called it — `OrderWorkflow` is Shopify-only end to
+  end (`fetchFulfillmentOrderStep`/`pushFulfillmentStep` both call `createShopifyClient` unconditionally,
+  no platform branching), and the only two existing crons are Gmail polling and the repricing sweep.
+  Built `apps/worker/src/marketplaceSync.ts` as a **plain cron-driven function, not a new Cloudflare
+  Workflow** — deliberately, since a failed poll or a failed single-order ingest just needs to retry on
+  the next 10-minute tick, and that doesn't need Workflow's durable step/retry machinery the way
+  Shopify's long-lived per-order lifecycle does. Line-item-to-supplier matching reuses the existing
+  `listings`/`supplier_offers` catalog tables (already maintained by the repricing sweep) rather than
+  `evaluateMarginStep`'s Shopify-path shortcut of "just pick the user's first supplier by createdAt" —
+  the user runs three real suppliers (Amazon, AliExpress, Temu), so that shortcut would have been wrong
+  for every order with more than one product line.
+- **`notifyTrackingReceived`** (`apps/worker/src/lib/notifyTrackingReceived.ts`) is the new single
+  branch point `email.ts`/`gmailIngestion.ts` call once a fulfillment's tracking is recorded — Shopify
+  storefronts still send the pre-existing workflow event; eBay/Amazon storefronts (which have no running
+  Workflow instance, since their orders never went through one) call `pushTrackingWithProxy` directly
+  instead. Same proxy hard-rule either way, since both paths ultimately funnel through
+  `trackingUploader.ts`.
+
+## TrackCaptain turned out to have a real API — replaced the manual-claim flow with automation
+
+Shortly after building the human-in-the-loop TrackCaptain queue (previous entry), the user found
+TrackCaptain's actual API docs (`https://trackcaptain.com/api/v1`, confirmed live) — contradicting the
+earlier research pass, which only surfaced their manual dashboard and concluded (reasonably, from what
+was publicly indexed) that no provider in this space had one. Rebuilt the integration around the real
+API rather than leaving the manual flow as the primary path:
+- **`POST /tracking/match-and-claim`** (not `/tracking/match` + `/tracking/claim` separately) — their
+  own docs recommend this one-shot endpoint for exactly this system's shape ("resellers whose customers
+  don't browse — they just need a number for an order"), and it avoids a match/claim race costing a
+  wasted credit against the same number another user claims in between the two calls.
+- **`TrackingProxyClient.convertTracking()`'s signature gained an optional `destination` parameter**
+  rather than forking a second interface — TrackCaptain's model (match by ship-to city/state/zip/country)
+  is fundamentally different from Bluecare Express/Aquiline's (convert a specific original number 1:1),
+  but every call site only cares "give me a valid number back," so one method covers both shapes; the
+  dead providers' real/mock classes didn't need any changes since TS structural typing allows
+  implementing an interface method with fewer params than an all-optional trailing param requires.
+- **Added `orders.ship_to_json`** (nullable text, simple additive migration — not the CHECK-constraint
+  rebuild class of change from the "Platform CHECK constraint" entry) since the buyer's shipping
+  destination wasn't persisted anywhere reachable by `fulfillmentId` for API-kind suppliers (only
+  `manual_tasks.payload_json` had it, and only for manual-kind suppliers). Populated at
+  `marketplaceSync.ts` ingestion time from `OrderSourceOrder.shipTo`.
+- **Kept the manual-claim queue as a fallback, not dead code** — any real-API failure (0 credits, no
+  destination match, key not configured, network error) falls through to the exact same
+  `pending-tracking-proxy-conversions` extension flow built moments earlier, so that work wasn't wasted;
+  it's now the safety net instead of the primary path.
+- **`hasRealTrackingProxyKey()`** gates whether the automated path is even attempted — checks the
+  configured provider's specific key is present and non-placeholder *before* calling the real client,
+  both to avoid a pointless network call with an empty bearer token and to keep the "went straight to
+  manual queue, no error logged" case distinguishable from "attempted and failed" in logs.
+- **Verified live**: `GET /account` against the real key returned a genuine account
+  (`zainey4@gmail.com`, `user_id: 340`) with `credit_balance: 0` — confirmed the integration is wired
+  correctly end to end, but the account needs credits purchased before any automated claim will
+  actually succeed in production (it degrades to the manual-queue fallback until then, not a crash).
+
+## Added TrackTaco as a second live provider, made it the default over TrackCaptain
+
+The user found TrackTaco's real API docs shortly after TrackCaptain's, having noticed TrackCaptain's
+own web dashboard search returned zero results for a plausible destination+date filter combination
+(over-constrained search, not a broken product — see the "no matches" screenshot exchange) while
+TrackTaco's search worked cleanly for the same kind of query. Built a second full adapter rather than
+just swapping providers, since both are legitimately live and the existing `TRACKING_PROXY_PROVIDER`
+selection mechanism already supports exactly this "pick one, keep the others wired" shape.
+- **TrackTaco's model is two-step, not atomic**: `POST /v2/tns/search` (free, rich filter set —
+  carrier/destination/status/date-range, not just destination) returns candidate `tn_id`s, then
+  `POST /v2/tns/reveal` (1 credit) claims the actual number. Fetches a small batch
+  (`CANDIDATE_PAGE_SIZE = 5`) up front and walks forward through it in-process on `already_revealed` —
+  their own docs name that outcome as an expected race ("another customer already revealed this
+  tracking number... run search again and pick a different one"), not an error worth failing the whole
+  attempt over, and having several candidates already in hand avoids a second round-trip search.
+- **Made TrackTaco the default** (`TRACKING_PROXY_PROVIDER` unset now resolves to `tracktaco`, not
+  `trackcaptain`) based on that live comparison, while keeping TrackCaptain fully wired and selectable
+  — this is a UX/product judgment call (which provider's search actually surfaces matches), not a
+  "TrackCaptain doesn't work" situation the way Bluecare Express/Aquiline were, so no reason to rip
+  either out.
+- **`hasRealTrackingProxyKey()` and `createTrackingProxyClient()` both switched their `?? 'trackcaptain'`
+  fallback to `?? 'tracktaco'`** in the same commit, deliberately kept in sync — a mismatch between
+  these two (one still defaulting to TrackCaptain) would silently attempt the wrong provider's key
+  check while calling the other provider's client, exactly the class of bug the `hasRealTrackingProxyKey`
+  gate exists to prevent in the first place.
+- The manual-claim extension queue/content-script stayed TrackCaptain-specific (`trackCaptain.ts`
+  targets trackcaptain.com's DOM) since it's the fallback path for either provider and wasn't the
+  focus of this change — noted in DEPLOY.md as a gap if the user standardizes on TrackTaco long-term.
+
+## Tracking proxy: cascade through all configured providers instead of picking one
+
+User's framing: "we can use all these services and get tracking whichever gives more suitable
+tracking ID" — rather than a single default provider with a manual override, `trackingUploader.ts`
+now tries every live provider with a configured key, in preference order (TrackTaco, then
+TrackCaptain), and uses whichever succeeds first.
+- `attemptAutomatedProxyConversion` replaces the old single-provider `hasRealTrackingProxyKey` +
+  `createTrackingProxyClient` call. A provider with no real key configured is skipped silently (not
+  logged as a failure — it was never attempted); a configured provider that fails logs and falls
+  through to the next one. Returns null only once every candidate has been tried, at which point the
+  caller falls back to the manual-claim queue exactly as before.
+- **Bluecare Express/Aquiline are deliberately excluded from the automatic cascade** — both are known
+  dead (see earlier entries), so silently attempting them on every real conversion would waste an
+  attempt and a confusing log line for a provider that can never succeed. They're still reachable by
+  explicitly setting `TRACKING_PROXY_PROVIDER`, which forces single-provider mode (cascade becomes a
+  one-element list) — the explicit override takes precedence over cascading through everything.
+- Did not build a "which candidate is more suitable for eBay" scoring model (e.g. preferring certain
+  carriers, delivery-date proximity, signature/photo-confirmation flags) beyond "first provider that
+  successfully returns a number wins" — TrackTaco's search response exposes enough metadata
+  (`service`, `status`, `weight_grams`, `signature_required`, `photo_confirmed`) that such a heuristic
+  is buildable, but doing so without the user specifying what "more suitable" concretely means would
+  be guessing at criteria rather than implementing a stated requirement. Noted as a possible follow-up.
+- Added a dedicated test (`trackingUploader.test.ts`, "cascades to TrackCaptain when TrackTaco fails")
+  proving the fallthrough itself, not just each provider in isolation — this is the behavior the
+  feature request was actually about, so it needed its own test rather than trusting that two
+  independently-correct provider clients compose correctly.
+
+## Tracking proxy: match origin country to destination country (domestic-looking shipments)
+
+User's ask: regardless of which supplier actually fulfills an order (Amazon, AliExpress, Temu), the
+proxied tracking number should look like a normal domestic shipment — a US buyer sees US-origin
+tracking, a German buyer sees DE-origin tracking, not wherever the real product actually ships from.
+- Added `TrackingProxyDestination.originCountry`, always set by `trackingUploader.ts`'s
+  `toProxyDestination()` to the *same* value as the destination country — not left for each provider
+  to infer, and not configurable per-supplier, since the whole point is this is supplier-agnostic: the
+  tracking-proxy step doesn't know or care which supplier sourced the item, so the domestic-match rule
+  applies uniformly to every proxied fulfillment.
+- Only TrackTaco's search API exposes an origin filter (`filter.origin: {country,state,city}`);
+  TrackCaptain's `/tracking/match-and-claim` has no origin parameter at all per its docs, so
+  `RealTrackCaptainClient` just doesn't use the field — no special-casing needed, since
+  `TrackingProxyDestination` fields are already all optional and providers that don't support one
+  simply ignore it (same pattern as `deliveryDate`, which no provider currently sends either).
+
+## Multi-tenant self-serve connections: eBay, AliExpress, CJ Dropshipping, Amazon Retail/Temu
+
+The user's ask: turn this from a single-tenant tool (one developer manually running every OAuth
+consent flow by hand, pasting tokens into `wrangler secret put`) into a real product — anyone signs
+up and connects their own eBay account and their own suppliers. Two research passes (Explore agents)
+before writing any code confirmed the actual shape of the gap:
+- The schema and every existing API route were **already correctly multi-tenant** — `storefronts`/
+  `suppliers`/`settings` are all `userId`-scoped, and every route (`orders.ts`, `listings.ts`,
+  `fulfillments.ts`, `disputes.ts`, `suppliers.ts`) filters strictly by the authenticated user's own
+  data. No cross-tenant leak pattern existed to fix.
+- `suppliers` already had full CRUD at the API layer (`POST/PATCH/DELETE /api/suppliers`) — just no
+  dashboard UI, and no notion of a customer supplying their own OAuth tokens rather than a developer
+  pointing at an `env:` Worker secret.
+- **Nothing let an end user actually connect anything.** `routes/oauth.ts` was a passive landing page
+  that displayed an OAuth code for a human to copy-paste; there was no token-exchange code anywhere,
+  and no `storefronts` create endpoint at all.
+
+**Scope decisions, confirmed with the user before building**:
+- Amazon in the customer-facing product means **Amazon Retail (manual/Buy-Queue) only** — Amazon
+  Business API requires each customer's own private agreement with Amazon and categorically can't be
+  self-served; exposing it as an option would be advertising something that structurally can't work
+  for almost anyone who clicks it.
+- **Credential encryption shipped in this same pass**, not deferred — customer OAuth tokens/API keys
+  were about to start landing in D1 for the first time, and shipping that plaintext even temporarily
+  wasn't acceptable once real strangers' credentials were on the table (this app's own single Wrangler
+  secret was fine to store as an `env:` pointer; a growing table of *other people's* tokens is a
+  different risk class entirely).
+
+**Architecture**:
+- **`credentialCrypto.ts`**: AES-256-GCM via Workers' built-in Web Crypto, one master key
+  (`CREDENTIAL_ENCRYPTION_KEY`, itself a Worker secret — never a customer credential) rather than an
+  external KMS, since this is a single Cloudflare account with no existing KMS integration and Web
+  Crypto is already available in the runtime for free. `resolveSecretRef` gained a third branch
+  (`enc:v1:...`) alongside its existing `env:VAR_NAME` (this app's own secrets) and literal-passthrough
+  (test fixtures) branches — necessarily made `resolveSecretRef` **async** (`crypto.subtle` is
+  Promise-based), which meant auditing and updating every one of its 4 call sites
+  (`orderSourceForStorefront.ts`, `supplierApiClientForSupplier.ts`, `gmailIngestion.ts`,
+  `webhooks.shopify.ts`) to `await` it — a small, mechanical, fully-typechecked change since
+  TypeScript's own `Promise<string>` vs `string` mismatch caught every site that needed updating.
+- **Every token-refresh callback now re-encrypts on write**, regardless of how the existing ref was
+  stored — this has the nice side effect of transparently upgrading any legacy `env:`-ref row to
+  encrypted-at-rest storage the first time it's refreshed after this shipped, with no explicit
+  migration step needed for existing single-tenant rows.
+- **`oauth_connect_states`** (new table, trivial additive migration): a provider's OAuth callback is
+  an unauthenticated browser redirect and can't carry a Bearer token, so a short-lived
+  `state -> userId` row (created by an authed "start" endpoint, consumed/deleted by the callback,
+  15-min TTL) is how the callback recovers which user gets the new `storefronts`/`suppliers` row.
+- **The `/start` endpoints return the consent URL as JSON, not a raw HTTP redirect** — caught this
+  during implementation, not planning: these endpoints require `Authorization: Bearer`, and a plain
+  browser navigation (`<a href>` or `window.location`) can't attach a custom header the way `fetch()`
+  can. The dashboard fetches the JSON, then navigates itself via `window.location.href`.
+- **Temu reuses the existing generic `'manual'` provider value instead of adding `'temu'` to the
+  enum** — `suppliers.provider`'s CHECK constraint doesn't have a `'temu'` value, and widening it would
+  mean the same drop+recreate rebuild risk as the "Platform CHECK constraint" saga (suppliers has FK
+  dependents: manual_tasks/fulfillments/listings/supplier_offers). Since Temu has no dedicated
+  integration anyway (same manual/Buy-Queue shape as Amazon Retail), reusing `'manual'` is not a
+  workaround — it's what that value already exists for. Distinguished from other manual suppliers by
+  `name`, not `provider`, in the connect flow's "already connected" lookup.
+- **AliExpress's refresh-token window doesn't extend on use** (a fact already documented from an
+  earlier milestone) — a connection with zero real order/price activity for ~2 days would silently
+  die. Added `refreshAliExpressSessionIfStale()` (extracted the actual HTTP refresh call out of
+  `RealAliExpressClient.ensureFreshSession()` into a shared function first, so the real-traffic path's
+  tight 5-minute margin and a new 12-hour keepalive cron's much wider margin share one implementation)
+  and `ALIEXPRESS_KEEPALIVE_CRON` (every 12h) so a connection stays alive indefinitely even with no
+  real business activity, not just during active use.
+- **CJ Dropshipping's raw dashboard `apiKey` is exchanged server-side once** for the actual bearer
+  credential (`POST /authentication/getAccessToken`) before anything is stored — the raw key itself
+  is never persisted anywhere, only the derived token.
+- **Found and fixed a real test-infrastructure gap while writing the dashboard's Connections tests**:
+  `apps/dashboard/vitest.config.ts` doesn't set `test.globals: true` (every test file explicitly
+  imports `describe`/`it`/`expect`, deliberately), which meant `@testing-library/react`'s own
+  auto-cleanup-between-tests never engaged (it only self-registers when it detects a *global*
+  `afterEach`). A multi-test file's second test was silently seeing the first test's leftover DOM
+  (confirmed live: 4 "Enable" buttons matched instead of 2). Added an explicit `afterEach(cleanup)` to
+  `src/test/setup.ts` — fixes every existing and future multi-test file in this package, not just the
+  one that surfaced it.
+
+## One-click approval queue: gate real-money supplier-order placement, not the rest of the pipeline
+
+Follow-on from the multi-tenant connections build. The user's exact framing, after two rounds of
+clarification: keep everything autonomous end-to-end (order ingestion, margin evaluation, supplier
+matching, cost computation) — but the moment real money is about to be committed, stop and require
+one human click on a fully-precomputed plan, then resume automatically.
+- **Scoped to exactly one checkpoint**: placing the order with an `api`-kind supplier
+  (`SupplierClient.createOrder()`). Explicitly NOT gated: tracking push to the marketplace, buyer
+  messaging, repricing/listing updates — all stay exactly as autonomous as before. The user's own
+  words ("just a last one click... with everything fixed") ruled out the broader multi-gate design
+  (separate approval steps for tracking push, messaging, repricing) that an earlier round of
+  clarifying questions had proposed and the user didn't engage with — a single checkpoint at the one
+  moment that actually spends money is what was asked for, not a general-purpose approval framework.
+- **`manual`-kind suppliers were already covered** — Amazon Retail/Temu's Buy Queue flow already *is*
+  a human-approval checkpoint (claim → mark ordered), just for a different reason (no real ordering
+  API exists at all, not a deliberate money-spending gate). This feature only had to fill the gap for
+  suppliers where a real API call currently fires with zero human involvement.
+- **`placeSupplierOrder`'s external contract didn't change** — still returns the fulfillment id,
+  still creates the fulfillment shell unconditionally. Only the `api`-kind branch's *content* changed
+  (queue a `pending_supplier_orders` row instead of calling `createOrder` immediately), so every
+  existing caller (the Shopify workflow, `marketplaceSync.ts`) needed zero changes. Note this also
+  means the same checkpoint now applies to any hypothetical future Shopify order using an `api`-kind
+  supplier — a deliberate, correct consequence of sharing the helper, not a special case to work
+  around: the real-money decision deserves the same checkpoint regardless of which storefront
+  platform the order came from.
+- **`approveSupplierOrder`/`rejectSupplierOrder` are both idempotent** against a duplicate click or
+  an already-decided row (checked via the `pending_supplier_orders.status` guard, both at the
+  function level and again as a 409 at the API route level) — a double-click or a retried request
+  must never place the same order with a supplier twice.
+- Existing tests for `placeSupplierOrder`/`marketplaceSync`/the Shopify workflow all passed unchanged
+  after this — none of them had ever asserted "the supplier API gets called immediately," since the
+  mock supplier client succeeds silently either way. That's not full coverage by itself; new
+  dedicated tests were added asserting the actual new behavior (a `pending_supplier_orders` row
+  exists post-`placeSupplierOrder`, approve places the order, reject doesn't, both idempotent).
+
+## Auto-provision `users` row on first real Clerk session (blocker for real customer signup)
+
+With real Clerk wired up, `authMiddleware` verified sessions cryptographically but still 401'd if no
+`users` row already existed for that `clerk_user_id` — meaning a brand-new customer signing up
+through Clerk's hosted `<SignIn/>` got 401 on every API call forever, since nothing auto-created their
+row. This directly blocked the user's actual goal for this whole build ("proper dashboard... release
+to customers... proper signup"): none of the multi-tenant connections/approval-queue work matters if
+a new signup can't get past the auth middleware in the first place.
+- Fixed by having `authMiddleware` call `provisionUser()` for any session that verifies but has no
+  matching row — `apps/worker/src/middleware/auth.ts`. Deliberately gated on `!isMockMode(...)`: mock
+  mode treats any bearer string as a valid session by design, so auto-provisioning there would create
+  a user for a typo'd token instead of correctly rejecting it — a meaningfully different failure mode
+  that stays covered by the existing mock-mode 401 test in `api.test.ts`.
+  `provisionUser` is race-safe (concurrent first-load requests all hitting the API at once): insert,
+  and on a unique-constraint conflict on `clerk_user_id`, re-read and return the winner's row instead
+  of erroring.
+- **`@clerk/backend`'s `createClerkClient().users.getUser()` doesn't actually work in this runtime.**
+  Needed the user's email (Clerk's verified JWT doesn't carry it without a custom template) to seed
+  the new row, and initially used the SDK client the same way `verifyToken` is already used elsewhere.
+  It fails at call time with `TypeError: Cannot use require() to import an ES Module`, thrown from
+  deep inside the SDK's own dependency chain (`snakecase-keys` -> `map-obj`, used by the SDK's generic
+  request/query-param formatter) — a Workers-runtime CJS/ESM interop limitation, same family as the
+  documented reason `verifyToken`'s import is already dynamic (DECISIONS.md milestone 7), except this
+  one fires when the code actually *runs*, not just when it's bundled, so dynamic import alone doesn't
+  dodge it. Fix: `fetchClerkUserEmail` (`packages/adapters/src/clerk/real.ts`) now does a plain
+  `fetch('https://api.clerk.com/v1/users/:id', { headers: { Authorization: 'Bearer <secret>' } })` and
+  reads the two snake_case fields it needs straight off the JSON — no SDK, no broken dependency chain.
+  Lesson for later: any *other* `@clerk/backend` SDK call beyond `verifyToken` should be assumed
+  guilty until tested — prefer raw Backend API `fetch` calls over the SDK client in this codebase.
+- If the email fetch fails for any reason (network blip, bad secret key, Clerk API hiccup),
+  provisioning still succeeds using a `<clerk_user_id>@unknown.clerk.user` placeholder rather than
+  blocking the user out of their own new account — matches the same "never let an unrelated failure
+  block the money-making path" bias behind other fallback patterns already in this codebase (e.g.
+  the tracking-proxy cascade).
+
+## Listings sync: eBay's read-only `listListings()` was fully built and never called
+
+Found while answering the user's question about how eBay listing management works ("I suppose our
+system only just fulfills orders, doesn't list, right?" — correct, this app never creates or publishes
+a listing, only reads and edits ones the seller already made themselves). Digging into *how* an
+existing listing gets into our `listings` table surfaced a real gap: `OrderSource.listListings()` was
+fully implemented for both eBay and Amazon adapters and fully unit-testable, but **nothing in
+production code ever called it** — the only callers were test files. Same shape of gap as the
+Clerk auto-provisioning issue above: a piece was built, tested, and never wired to anything that
+actually runs, so a brand-new customer connecting their eBay account got an empty `listings` table
+forever, and every one of their orders would fall to `exception` (no SKU match possible) regardless of
+how correct the rest of the pipeline is.
+
+- **New module**: `apps/worker/src/catalog/listingsSync.ts`'s `syncListingsForStorefront()` — pulls
+  `OrderSource.listListings()`, upserts each into `listings` keyed on `(storefrontId,
+  externalListingId)` (the actual marketplace-assigned identity of a listing — not `sku`, which isn't
+  guaranteed unique and can change), and runs any still-unmatched listing through the existing
+  `matchListing()` cascade so a newly-synced listing gets a shot at an automatic supplier match
+  immediately, not on some later pass.
+- **Wired in two places**: once inline in the eBay OAuth callback
+  (`apps/worker/src/routes/oauth.ts`) right after the storefront row is created/updated, so a
+  customer's existing catalog shows up the moment they connect rather than waiting for the next cron
+  — best-effort, wrapped so a sync failure never blocks the connection itself; and once per tick
+  inside `pollMarketplaceOrders`'s existing per-storefront loop (`apps/worker/src/marketplaceSync.ts`),
+  which already builds an `OrderSource` for every `ebay`/`amazon` storefront on its 10-minute cron, so
+  reusing that loop needed no new cron trigger. Listing sync runs *before* order ingestion in that
+  loop so an order landing in the same tick as a listing update can still match against it.
+- **Found and fixed a real cross-tenant bug in the same code path**: `matchListing()`
+  (`apps/worker/src/catalog/matchListing.ts`) queried `suppliers` with `where(eq(suppliers.active,
+  1))` and no `userId` filter at all — since it was never actually invoked in production before this,
+  the bug was latent rather than exploited, but wiring it up live without fixing it would have shipped
+  a real leak: one customer's listing could get matched against (and its cost data pulled from)
+  *another* customer's supplier account. Fixed by resolving the listing's owning `storefronts.userId`
+  first and scoping the supplier query to it. Covered by a dedicated test in both
+  `matchListing.test.ts` (a second tenant's active, API-matchable supplier must never win a match) and
+  `listingsSync.test.ts` (same assertion end-to-end through the sync path).
+- `listingsSync.test.ts` also covers the upsert semantics directly: a brand-new `externalListingId`
+  inserts and gets matched; a repeat sync of the same `externalListingId` updates price/title/quantity
+  in place rather than duplicating the row, and does **not** re-run the match cascade on a listing
+  that's already matched (avoids re-spending an LLM call on every single cron tick for a catalog that
+  hasn't changed).
+
+## Fixed: "Connect eBay"/"Connect AliExpress" buttons did nothing — stale cached Clerk token
+
+Reported live by the user testing as a real customer: clicking either connect button produced no
+visible effect at all — no redirect, no error, nothing. Root cause was in the dashboard, not the
+connect endpoints themselves: `apps/dashboard/src/lib/clerkAuth.tsx`'s `ClerkBridge` called
+`getToken()` exactly once, on sign-in, and cached that JWT string in React state for the rest of the
+session. Clerk session tokens default to a 60-second lifetime — so roughly a minute after signing in,
+every `apiFetch` call across the *entire app* (not just Connections) was sending an expired bearer
+token, which `authMiddleware` correctly 401s. Nothing rendered that failure anywhere: the Connections
+page had no error UI wired up for the eBay/AliExpress mutations at all (only the CJ key-paste form had
+one) — a failed click looked identical to a successful no-op.
+- **Fix**: `ClerkBridge` now re-calls `getToken()` on an interval (every 30s, comfortably under the
+  60s default lifetime) instead of once, so whatever's cached in the `AuthContext` is always fresh
+  enough for the requests that read it.
+- **Also added visible error text** to the eBay/AliExpress connect buttons in
+  `apps/dashboard/src/pages/Connections.tsx`, matching the pattern the CJ form already had — a failed
+  connect attempt (expired token, or a provider not configured yet — see next entry) now always shows
+  something on screen instead of silently doing nothing. This is a real, generally-applicable fix:
+  the same staleness would eventually have hit any other mutation/action in the app, not just these
+  two buttons — it only surfaced here first because a "did my click work?" action makes a silent 401
+  obvious in a way a background query refetch doesn't.
+
+## eBay OAuth app credentials were never actually set as production secrets
+
+Found while investigating the button issue above: `wrangler secret list` on the real deployment shows
+`ALIEXPRESS_APP_KEY`/`ALIEXPRESS_APP_SECRET` present (set earlier this session) but **no
+`EBAY_CLIENT_ID`/`EBAY_CLIENT_SECRET`/`EBAY_RUNAME` at all**. `/api/connections/ebay/start` correctly
+503s with `NOT_CONFIGURED` in this state — that part of the code was always right — but until the
+token-staleness bug above is fixed, that 503 was invisible, indistinguishable from "the button is
+broken." With the error UI now in place, "Connect eBay" will show this 503's message directly instead
+of silently failing. Resolved (2026-07): the user provided a real Production keyset (App ID, Cert ID,
+RuName), set as `EBAY_CLIENT_ID`/`EBAY_CLIENT_SECRET`/`EBAY_RUNAME` production secrets — "Connect eBay"
+now completes end-to-end against a live account.
+
+## First-ever order poll always 400'd: epoch-0 `since` exceeds eBay's 2-year filter window
+
+Found live via `wrangler tail` while debugging the connected user's eBay account: every
+`pollMarketplaceOrders` tick failed with `eBay API request ... failed: 400 {"errorId":30830,...,
+"message":"Start date must be within '2' years from present date"}`. Root cause in
+`apps/worker/src/marketplaceSync.ts`: a never-polled storefront computed `since = storefront.lastPolledAt
+?? 0`, i.e. epoch 1970-01-01, and eBay's Fulfillment API rejects any `creationdate` filter more than 2
+years in the past. Because a failed poll never advances `lastPolledAt` (by design — see the function's
+own comment, so a transient failure gets retried in full), this wasn't a one-time hiccup: **every brand-new
+eBay/Amazon storefront would fail this exact way on every single poll, forever**, with orders never
+ingesting at all. Fixed by falling back to `storefront.createdAt` instead of `0` — a storefront can't
+have orders from before it was connected to trackzy in the first place, so this is both correct and
+automatically satisfies eBay's 2-year window for any realistically-aged storefront.
+
+## eBay's REST Inventory API doesn't see "classic" listings — rebuilt listing read/update on Trading API
+
+The listings-sync feature (previous entry) shipped and immediately hit a real account with zero
+results: `GET /sell/inventory/v1/inventory_item` returned `{"total":0,"size":0}` for a seller with
+multiple live eBay listings. Confirmed via a temporary debug log against production before touching any
+code (see the raw response in this commit's history) — this wasn't a sync bug, it's an eBay data-model
+gap. eBay has two independent listing systems:
+- **Inventory API** (`/sell/inventory/v1/*`) — SKU-based "multi-quantity" listings, a newer format.
+- **Classic listings** — anything created the traditional way (Seller Hub's normal "List an item" flow,
+  bulk tools, File Exchange, Turbo Lister). This is what most individual sellers actually have, and
+  these listings simply don't exist as far as the Inventory API is concerned, regardless of quantity or
+  activity — there's no partial visibility, it's a hard `0`.
+
+User's explicit choice (given two options — build Trading API support, or ask every customer to
+manually migrate their listings to the Inventory API format on eBay's side): build Trading API support,
+since it works for every customer with classic listings (the common case) with no extra setup asked of
+them.
+- **New**: `RealEbayOrderSource.tradingApiRequest()` (`packages/adapters/src/ebay/real.ts`) — a shared
+  helper for eBay's older XML Trading API (`POST https://api.ebay.com/ws/api.dll`). Auth reuses the
+  exact same OAuth user access token already obtained for the REST Sell APIs, passed via the
+  `X-EBAY-API-IAF-TOKEN` header instead of the legacy `<RequesterCredentials>` XML block — eBay's
+  documented bridge for OAuth users who need a Trading API call with no REST equivalent. TODO(HUMAN):
+  this auth bridge and the compatibility level (`TRADING_API_COMPATIBILITY_LEVEL = 1193`) are both
+  unverified against a live account — a rejected level or an auth failure surfaces loudly as
+  `Ack=Failure` with eBay's own error text, not silently.
+- **`listListings()`** now calls `GetMyeBaySelling`'s `ActiveList` (paginated, 100/page, capped at 20
+  pages) instead of the REST Inventory API — this call surfaces every currently-active listing
+  regardless of which system created it, so it replaces the old path entirely rather than running both.
+  A classic listing frequently has no `SKU` at all; falls back to the eBay `ItemID` in that case (same
+  fallback convention used elsewhere in this codebase for "no better identifier").
+  Used `fast-xml-parser` (new dependency, `packages/adapters`) with `parseTagValue: false` — its default
+  numeric coercion would otherwise silently turn eBay's long numeric `ItemID` strings into JS numbers,
+  risking precision loss and breaking every downstream `string` assumption (`OrderSourceListing.externalListingId:
+  string`) — worth calling out since it's an easy default to get bitten by with this library.
+- **`updateListing()`** now issues one `ReviseFixedPriceItem` call with whatever fields are actually
+  changing (price/quantity/title), replacing three separate REST calls (one of which — the title update
+  — carried an explicit unverified TODO(HUMAN) about a SKU/offer-id mismatch that no longer applies,
+  since Trading API addresses everything by `ItemID` uniformly). `pauseListing()` is unchanged in
+  behavior (still revises quantity to `0`), just riding the new call path.
+- Added `packages/adapters/src/ebay/real.test.ts` (didn't exist before — this real adapter had zero
+  direct unit tests prior to this) covering: SKU-present and SKU-absent parsing, the single-item vs.
+  array response shape difference `fast-xml-parser` produces, pagination, `Ack=Failure` surfacing as a
+  thrown error, and `updateListing`/`pauseListing`'s XML field selection and escaping.
+
+## No dashboard page ever displayed `listings` — the sync worked, there was just nowhere to see it
+
+After the Trading API fix above, a real listing (title, price, quantity all correct) was confirmed
+synced into D1 — but the user still reported "I still don't see any product appearing on portal."
+Root cause: no `Listings` page existed in the dashboard at all — no route, no nav entry, nothing ever
+called `GET /api/listings` from the frontend. The route itself has existed since the title-optimization
+feature; it just never had a UI built for the plain "browse your catalog" case. Added
+`apps/dashboard/src/pages/Listings.tsx` (route `/listings`, nav entry between Approvals and
+Fulfillments) — a table of every synced listing (title/SKU/price/qty/status) plus which supplier it's
+matched to (or "Unmatched"), with the same "Sync now" action already added to the Connections page.
+
+## Gemini's `text-embedding-004` was retired — broke the match cascade's embedding step silently
+
+Surfaced live in worker logs while testing the listings sync: `matchListing failed ... Gemini embedding
+request failed: 404`. Confirmed via web search: Google retired `text-embedding-004` on 2026-01-14;
+`gemini-embedding-001` is the current replacement with the same `embedContent` request/response shape.
+Fixed the default in `packages/adapters/src/gemini/real.ts`'s `embedText()` (still overridable via
+`GEMINI_EMBEDDING_MODEL`, unchanged). This was a real-but-contained blocker: `matchListing()`'s cascade
+tries exact-SKU/fuzzy-title first and only reaches the embedding step when those miss, and a thrown
+error there is caught by `listingsSync.ts`'s best-effort wrapper (logged, not fatal) — so listings still
+synced in correctly throughout, they just couldn't fall through to embedding-based matching until this
+was fixed. Worth remembering for next time a Gemini-adjacent call starts failing in production: check
+whether the specific model name has been deprecated before assuming the integration itself is broken.
+
+## Manual match resolution: a human picks from 3-4 candidates when the auto-cascade declines to guess
+
+Follow-on from watching the fix above land on a real listing ("3D Travel Silk Eye Mask..."): the cascade
+correctly found candidate products on AliExpress but declined to auto-commit any of them (a generic,
+widely-duplicated product title is exactly the case where a confident guess would risk paying for the
+wrong item) — but there was no way to resolve that listing at all, it just sat "Unmatched" forever. The
+user's own framing: show 2-4 potential matches in a dropdown to pick from, or an explicit "don't match"
+option, rather than leaving it stuck with no way to act on it.
+- **`matchListing.ts` refactored** to share its candidate-gathering (`gatherCandidates`) and
+  user-scoped-supplier lookup (`userMatchableSuppliers`) between the existing automatic cascade and two
+  new exported functions — no behavior change to the automatic path, verified by the existing
+  `matchListing.test.ts`/`listingsSync.test.ts` suites passing unchanged.
+- **`findMatchCandidates(env, listingId, limit=4)`**: runs the same candidate search + embedding
+  similarity scoring the auto-cascade uses, but stops short of auto-deciding — returns the top N sorted
+  by score with live pricing (`getOffer`) for display, committing nothing. New route: `GET
+  /api/listings/:id/candidates`.
+- **`applyManualMatch(env, db, listingId, choice)`**: commits a human's decision — either a specific
+  `{supplierId, supplierProductId}` (persists the match plus a `supplier_offers` row, mirroring what the
+  auto-cascade's own `persistMatch` does, via a shared `upsertSupplierOffer` helper) or `null` for an
+  explicit "leave unmatched" decision. New route: `POST /api/listings/:id/match`, ownership-checked at
+  the route level (the listing and the chosen supplier must both belong to the requesting user) before
+  calling this trusted lib function — same layering as `approveSupplierOrder`/`rejectSupplierOrder`.
+- **Both a manual match and an explicit "don't match" write `matchSource: 'manual'`** — this is what
+  distinguishes "a human looked at this and confirmed there's no match" from "nobody's ever resolved
+  this yet," so the Listings page can show "No match (reviewed)" instead of nagging with "Unmatched"
+  again for something already decided. (`matchSource: null` still means "never looked at.")
+  `MatchSource` in `@fulfillment-tracker/core` deliberately doesn't include `'manual'` — that's a
+  DB/UI-level concept, not part of the cascade's own confidence-threshold vocabulary, so the two new
+  functions bypass `MatchResult`/`MatchSource` entirely rather than force a mismatched type through them.
+- **Dashboard**: `Listings.tsx` gained an inline "Resolve" affordance (an expandable row, not a modal,
+  to keep the scope contained) — scored candidates (supplier, title, price, match %) plus a "Don't
+  match" link, wired to the two new endpoints. Superseded by candidate *cards* rather than a `<select>`
+  in the very next entry below, once product images entered the picture.
+
+## Product images/titles on matches, plus a dashboard listings summary — "are they even correct?"
+
+Direct follow-on from watching the manual-match feature above land: the user's real question wasn't
+just "let me pick a candidate," it was "show me enough to actually judge whether the match is right" —
+a supplier product id and a confidence percentage don't answer that; a photo and the actual product
+title do. Also asked for the main dashboard to surface how many products are listed at a glance, with a
+click-through to the Listings page — the sidebar nav already had a link, but nothing on the landing
+page signaled "there's a catalog here, here's its state."
+- **`SupplierProduct` (`packages/adapters/src/supplierApi/iface.ts`) gained `imageUrl?: string`**,
+  mapped best-effort in all three real adapters (AliExpress, CJ, Amazon Business) and all three mocks
+  (deterministic `picsum.photos/seed/<id>` placeholders for hermetic tests). Two of the three real
+  mappings (`image_url` for AliExpress, `imageUrl` for Amazon Business) are explicit TODO(HUMAN)
+  guesses — unlike the fields already confirmed live in these same files (`itemId`/`title` for
+  AliExpress, `pid`/`productNameEn` for CJ), this session had no live account handy to verify an image
+  field specifically, so it's flagged rather than asserted as fact. CJ's `productImage` is a
+  commonly-documented field name, still marked TODO(HUMAN) since it's likewise unconfirmed against a
+  live response.
+- **New nullable columns**: `supplier_offers.product_title` / `product_image_url` (migration
+  `0008_yielding_tombstone.sql`, plain `ALTER TABLE ADD COLUMN` — no rebuild, same low-risk shape as
+  every other additive migration this session). `matchListing.ts`'s `persistMatch` and
+  `applyManualMatch` both persist these via a shared `upsertSupplierOffer` helper — the auto-cascade's
+  own matched candidate already carries `title`/`imageUrl` from the search step, and the manual-match
+  route (`POST /api/listings/:id/match`) now accepts them from the client too, since they were already
+  shown to the human as part of the candidate they picked — trusted display metadata, not re-derived
+  server-side (avoids one more live supplier API round-trip for data already in hand).
+- **`GET /api/listings` left-joins `supplier_offers`** (matched on `listingId` + `supplierId`) to
+  return `matchedProductTitle`/`matchedProductImageUrl` per listing — this is what actually lets the
+  Listings page render "here's what it matched to," not just "matched: yes/no."
+  **`GET /api/listings/:id/candidates`** likewise returns each candidate's `imageUrl`.
+- **Listings page redesigned around this**: the "Resolve" picker became a list of candidate *cards*
+  (photo + title + supplier + price + match %) instead of a `<select>` — plain HTML `<option>` elements
+  can't render images, so a dropdown was a dead end the moment a photo mattered. A matched listing's row
+  now shows the actual matched product's thumbnail + title next to the supplier name, so "are they even
+  correct" is answerable at a glance instead of trusting a percentage blindly.
+- **`GET /api/metrics` gained `listingsTotal`/`listingsMatched`**, and the Orders page (the dashboard
+  landing view) gained a "Listings" tile showing `matched/total` that links straight to `/listings` —
+  reuses the existing single metrics round-trip rather than adding a second query just for a count.
+
+## Product link too, not just image — a photo alone doesn't let you click through and check
+
+Immediate follow-on: an image can still be low-res, wrong-angle, or missing entirely, and the user
+wanted to be able to click through to the actual supplier product page regardless. Added
+`SupplierProduct.productUrl?: string` alongside `imageUrl`, mapped in all three real adapters using
+each platform's own public product-page URL scheme — confidence varies and is called out honestly per
+adapter:
+- **AliExpress** (`https://www.aliexpress.com/item/<itemId>.html`) and **Amazon**
+  (`https://www.amazon.com/dp/<asin>`) — both stable, long-public URL schemes, no live account needed
+  to be confident, unlike `imageUrl` in these same adapters.
+- **CJ Dropshipping** (`https://www.cjdropshipping.com/product/-p-<pid>.html`) — an unverified guess,
+  flagged TODO(HUMAN) same as its `imageUrl` field, specifically called out as "a wrong link is worse
+  than none, don't trust this blindly" in the code comment.
+- New nullable `supplier_offers.product_url` column (migration `0009_robust_stellaris.sql`, same
+  additive `ALTER TABLE ADD COLUMN` shape). Threaded through the exact same path as `imageUrl` end to
+  end: `gatherCandidates` → `ScoredMatchCandidate`/`findMatchCandidates` → the manual-match `POST
+  /api/listings/:id/match` body → `applyManualMatch`/`upsertSupplierOffer` → `GET /api/listings`'s join
+  → the dashboard.
+- **Dashboard**: a "View ↗" link (`target="_blank"`) next to both the matched-product display and each
+  candidate card. The candidate card had to stop being a `<button>` wrapping everything (a nested `<a>`
+  inside a `<button>` is invalid, and click-through would fight the button's own onClick) — became a
+  `div[role="button"]` with keyboard support (`Enter`/`Space`) instead, with the link's own click handler
+  calling `stopPropagation()` so clicking "View" opens the product without also toggling selection.
+
+## AliExpress's search endpoint returns irrelevant "trending" products, not real search results
+
+Discovered live: the user's synced eye-mask listing kept getting suggested jellyfish toys, dog training
+collars, and camera cables — the exact same query text (`listing.title`) returned a completely different,
+unrelated set of products on every single call. Confirmed via a temporary debug log (removed once the
+finding was solid): `aliexpress.ds.text.search`'s `selection_search_product` field name is the tell —
+this is almost certainly AliExpress's curated "Dropshipping Selection" feed (a small, trend-driven
+subset of the catalog), not a real full-text search across AliExpress's marketplace. No amount of
+prompt/threshold tuning on our end fixes this; the endpoint itself isn't giving us what the adapter's
+own (now-corrected) comment originally assumed.
+- **Researched the alternative**: AliExpress's Affiliate API (`aliexpress.affiliate.product.query`) does
+  perform genuine full-catalog keyword search — but it's gated behind a **separate AliExpress Affiliate
+  Program signup** (portals.aliexpress.com, ~1-3 business day approval) that issues a `tracking_id`
+  required on every call. This is not something the current Dropshipping-API app approval covers, and
+  not something a code change alone can unlock — **user decision, still pending**: sign up for the
+  affiliate program to get real search, or keep working around the current endpoint's limitation. No
+  other Open Platform method offers genuine keyword search without this same gating.
+- **Shipped in the meantime** (doesn't require the affiliate signup, doesn't wait on anything): a minimum
+  relevance cutoff, `MIN_CANDIDATE_SCORE_FOR_REVIEW = 0.5` in `matchListing.ts`. Deliberately looser than
+  the auto-commit cascade's own `EMBEDDING_THRESHOLD` (0.85, core's `matching.ts`) — a human reviews
+  every candidate `findMatchCandidates()` surfaces, so the bar only needs to filter obvious garbage, not
+  guarantee correctness the way an unsupervised auto-match must. This is the fix for "the picker showed
+  candidates that were clearly wrong," independent of whichever search API eventually feeds it — the
+  cascade's own auto-match path already had this kind of floor via `EMBEDDING_THRESHOLD`; the manual
+  picker simply never had an equivalent one until now.
+
+## Migrated the 5 chat/JSON LLM call sites from Gemini to Groq — embeddings stayed on Gemini
+
+Gemini's free tier turned out to be far too tight for even light testing: a hard 20 requests/day cap on
+`generate_content` (confirmed live via repeated 429s while testing the AliExpress issue above). User's
+choice, given two options (upgrade Gemini billing vs. switch to Groq): switch to Groq — Groq's free tier
+is 14,400 requests/day, more than enough headroom.
+- **Groq has no embeddings API at all** (confirmed via research — chat/completions only, `nomic-embed`
+  references in their SDK are vestigial OpenAI-SDK-codegen boilerplate, not a real supported feature).
+  This means `embedText` — used only for the SKU/listing match cascade's cosine-similarity stage —
+  **stays on Gemini**, whose `embedContent` quota is tracked separately from `generate_content` and
+  wasn't the thing that got exhausted. User's explicit choice once this constraint was surfaced: keep
+  embeddings on Gemini, move everything else to Groq, rather than dropping the embedding stage entirely.
+- **Kept the `Gemini*`/`createGeminiExtractor` names** despite the hybrid backend — dozens of call sites
+  import these, and renaming would be pure churn for zero behavior change. `packages/adapters/src/gemini/iface.ts`'s
+  docstring now explains the hybrid split up front so this isn't confusing later.
+  `RealGeminiExtractor`'s five chat/JSON methods (`extractTracking`, `draftDispute`, `pickBestListingMatch`,
+  `classifyTrackingException`, `suggestListingTitle`) now call `POST https://api.groq.com/openai/v1/chat/completions`
+  (OpenAI-compatible, `Authorization: Bearer <GROQ_API_KEY>`, default model `openai/gpt-oss-120b`,
+  overridable via `GROQ_MODEL`) using Groq's Structured Outputs (`response_format: {type: "json_schema",
+  json_schema: {name, schema, strict: true}}`). Rewrote each JSON Schema from Gemini's own dialect
+  (`nullable: true` sibling flags) to standard JSON Schema (`type: [X, "null"]` unions,
+  `additionalProperties: false`, every property in `required`) to match OpenAI/Groq's strict-mode
+  convention. TODO(HUMAN): this exact schema-enforcement shape is unverified against a live Groq
+  account — same "confirmed live vs. best-effort guess" honesty this codebase applies everywhere else;
+  a schema-validation error here is the first thing to check if one ever surfaces.
+- **Mock-mode gate widened**: `createGeminiExtractor` now checks both `GEMINI_API_KEY` and `GROQ_API_KEY`
+  (either missing/placeholder → mock), matching the established multi-secret gate convention (e.g. eBay's
+  `CLIENT_ID` + `CLIENT_SECRET`) — previously only `GEMINI_API_KEY` gated it, which would have let a
+  real Gemini key with a still-placeholder Groq key resolve to the real extractor and fail every chat call.
+- New `packages/adapters/src/gemini/real.test.ts` (didn't exist before this) covering: the Groq request
+  shape/auth header, `pickBestListingMatch`'s "none" sentinel, the `GROQ_MODEL` override, Groq error
+  surfacing, and — separately — that `embedText` still hits Gemini's endpoint, confirming the split
+  actually holds at the code level, not just in the docstring.
+- Removed the now-unused `GEMINI_MODEL` env var everywhere (only ever consumed by the chat-completion
+  path, which no longer exists on the Gemini side) — added `GROQ_API_KEY`/`GROQ_MODEL` in its place across
+  `.dev.vars`/`.dev.vars.example`/`env.ts`. **Still TODO(HUMAN)**: a real `GROQ_API_KEY` production
+  secret needs to be set before this actually takes effect live — until then `createGeminiExtractor`
+  correctly falls back to mock mode rather than silently failing.
+  **Resolved (2026-07)**: user provided a real `GROQ_API_KEY`, set as a production secret. Confirmed
+  live: re-running the match cascade against the still-irrelevant AliExpress candidates now correctly
+  and confidently declines to match any of them (0.99 confidence, no supplier chosen) — the exact
+  behavior the LLM safety net was always supposed to provide, unblocked now that it isn't rate-limited.
+
+## Product discovery ("what's worth listing") — native, not bridged from an external scraper
+
+User shared a separate repo (`zgents-ebay_scraper`, Python + Playwright) that finds profitable
+dropshipping niches by scraping eBay's sold/completed listings and scoring them. Two real constraints
+before building anything:
+- **Tech-stack mismatch**: Cloudflare Workers can't run Python or launch a real headless browser —
+  that tool can't be ported in as-is, only bridged to (external process pushes results into a new
+  ingest endpoint) or reimplemented natively.
+- User's explicit choice once this was surfaced: **reimplement the underlying idea natively** in the
+  Workers stack, not bridge to the external tool — "take the underlying idea and develop in your own
+  worker way." This also meant dropping an initial, now-unused schema addition (`users.apiKeyHash` +
+  an ingest-auth path) built for the bridging approach before the direction changed — reverted cleanly
+  since the migration adding it had only ever been applied locally, never to production.
+- **Real sold-item data is out of reach**: researched eBay's Marketplace Insights API
+  (`item_sales/search`, the actual sold/completed-listings endpoint) as the honest native equivalent —
+  it's a "Limited Release" API gated behind discretionary business-unit approval; small apps are
+  routinely denied even after requesting the scope (confirmed via eBay's own developer community
+  threads, not assumed). Not something a code change can unlock.
+- **What's actually accessible**: the Browse API's `item_summary/search` — ACTIVE listings only, but
+  covered by the *standard* Buy API access this app's existing eBay keyset already has, using an
+  app-level client-credentials token (no per-user/per-storefront OAuth needed, since this searches
+  eBay's public catalog generally, not any one connected seller's own data). New adapter
+  `packages/adapters/src/ebayMarketResearch/` (mirrors the existing `ebay/` adapter's real/mock/iface
+  structure) — `RealEbayMarketResearchClient.getAppToken()` does the client-credentials grant fresh per
+  call (no cross-request token cache/KV needed for what's an interactive, low-volume feature, not a
+  polling loop).
+- **Honest scoring, not a copy of the original tool's**: the scraper's opportunity score weighted
+  "sales velocity" at 40 of 100 points — a demand signal this app genuinely cannot compute without
+  Marketplace Insights. `packages/core/src/productOpportunity.ts`'s `computeOpportunityScore` is
+  supply-side only (price positioning toward a $100 sweet spot, seller-count competition, free-shipping
+  prevalence) and says so directly in both the code comment and the dashboard copy — never presented as
+  a demand guarantee, since it structurally can't be one.
+- New table `product_opportunities` (migration `0010_parched_thunderbird.sql`) — one row per keyword
+  scan, user-scoped, with a JSON sample of representative active listings so a human can sanity-check a
+  score without re-running the search. Field names say "price"/"listings", deliberately not "sold", to
+  stay honest about what the data represents.
+- New route `POST /api/product-opportunities/search` (runs the live eBay search, scores it, persists),
+  `GET /api/product-opportunities` (scan history, scoped to the authed user). New dashboard page
+  `Opportunities.tsx` — search box, history table, and the same "active listings, not sold — starting
+  filter, not a demand guarantee" caveat surfaced directly in the UI, not just buried in a code comment.
+
+## Superseded the above: real sold-data via Apify + the original tool's actual methodology
+
+After using Opportunities live, the user was explicit: they wanted real demand data and better margins
+"how the original repo was doing it," not an active-listings proxy — and the original tool's own deep
+search (iteratively refining a keyword until it finds a winning niche), not a single flat scan.
+- **Confirmed how the original tool actually gets its data**: it scrapes eBay's own public sold-listings
+  page directly (`LH_Sold=1&LH_Complete=1`) with a real headless Chromium browser (Playwright) plus
+  residential proxies and stealth patches — not a special data source, just heavy engineering effort
+  spent specifically on not getting blocked by Akamai Bot Manager while fetching public data. Cloudflare
+  Workers can't replicate that (no real browser, and Cloudflare's own IPs would be *easier* to
+  fingerprint as a bot than a residential proxy would).
+- **Landed on Apify** — third-party actors that perform this exact same sold-listings scrape as a
+  hosted service; Apify absorbs the anti-bot/maintenance burden, we just call an API. Sub-cent per
+  record, ~$5 free credit on signup (~1,400 free records) — user tested on the free tier before
+  deciding on any paid usage, same evaluate-before-commit approach already used for AliExpress's Apify
+  option.
+- **Not every candidate actor actually works — tested three live, found this out the hard way.**
+  `automation-lab/ebay-sold-scraper` (the one first wired up, based on Apify's own research-stage
+  description) came back with **zero results even for its own documented example query**
+  ("vintage camera") — its log showed "No listings on page 1, stopping search" with a residential proxy
+  active, meaning it's currently being blocked or its selectors are stale. `midwest_united/ebay-sold-comps`
+  similarly returned zero for both "silk eye mask" and "nintendo switch console" (a term with obviously
+  thousands of real sales) — its log explicitly caught an Akamai bot-challenge on one attempt. Confirmed
+  via real API calls (async run + poll + log inspection), not assumed from actor descriptions alone.
+  **`caffein.dev/ebay-sold-listings`** (301k+ total runs, 2,255 users, 4.0★/13 reviews, rebuilt as
+  recently as 2 days before this test) is the one that actually works — verified with real, relevant
+  results for "silk eye mask" and "nintendo switch console" alike. This is now the wired-up default
+  (`APIFY_EBAY_SOLD_ACTOR_ID` still overridable). Lesson: an Apify actor's install/run counts and
+  freshness are a much better live-functionality signal than its description or category fit —
+  low-usage scraper actors rot quickly as the target site's anti-bot defenses evolve.
+- **Input/output shape corrected to match what was actually confirmed live**, not the earlier guess:
+  input is `{keywords: [keyword], count}` (an array even for a single keyword — this actor's own
+  convention), output fields are `soldPrice` (numeric string), `endedAt`, `sellerUsername`,
+  `shippingType`/`shippingPrice`, `bidCount` (not the originally-assumed `soldDate`/`sellerName`/
+  `shippingCost`/`bidsCount`). One real limitation found in the confirmed output: `sellerUsername` came
+  back `null` on every live result — this actor doesn't reliably expose seller identity, so the
+  `uniqueSellers` competition signal computed from it will likely undercount; flagged in the adapter's
+  own docstring rather than silently trusted.
+- **Rebuilt `computeOpportunityScore` (`packages/core/src/productOpportunity.ts`) as a direct port** of
+  the original's `compute_dropship_score`, not a reinvention: price (up to 20 pts, $50-100 sweet spot),
+  seller competition (up to 20 pts, fewer sellers = better), sales velocity (up to 40 pts — weighted
+  highest, matching the original's own judgment that demonstrated demand matters most), free-shipping
+  prevalence (up to 20 pts). Verified against a hand-computed reference case in
+  `productOpportunity.test.ts`, not just "does it return a number."
+- **New adapter method** `EbayMarketResearchClient.searchSoldListings()` (Apify-backed) alongside the
+  existing `searchActiveListings()` (Browse API, kept — still available, just no longer driving the
+  score). Mock-mode gate widened to require `EBAY_CLIENT_ID`/`EBAY_CLIENT_SECRET`/`APIFY_TOKEN` all
+  present, since the two methods now depend on entirely different credentials.
+- **Ported the original's "Deep Search" agentic loop**, using Groq instead of the original's local
+  Ollama: if a scanned keyword's score is below 60 (same default threshold as the original), asks Groq
+  for more specific sub-keywords, scans up to 3 per round (capped — unlike the original's own scraper,
+  each attempt here is a real, non-free Apify call), keeps the best-scoring one, up to 3 rounds. The
+  winning keyword gets a final Groq-generated advisory analysis (verdict, sell-price range, target
+  source price, margin estimate, risk, next keywords to try) — purely advisory copy for a human,
+  never auto-acted on. Every attempted keyword is persisted as its own scan row (not just the winner),
+  so the history shows the whole exploration, not just the final answer.
+- **Two new, explicitly-authorized LLM call sites** (`suggestRefinedKeywords`, `analyzeOpportunity` —
+  see `packages/adapters/src/gemini/iface.ts`'s updated docstring, now covering seven sites total): both
+  operate entirely in the pre-listing research phase, before any product is sourced, listed, or ordered
+  — no margin calculation or money committed anywhere in this path, so this doesn't violate the
+  established "never call the LLM from the margin/money path" rule, it's just a different phase of the
+  pipeline that rule was never about.
+- Schema: extended `product_opportunities` with nullable `ai_verdict`/`ai_sell_price_min_cents`/
+  `ai_sell_price_max_cents`/`ai_target_source_price_cents`/`ai_margin_estimate_cents`/`ai_risk`/
+  `ai_recommended_keywords_json` (migration `0011_lean_star_brand.sql`, additive only). Deliberately
+  did **not** rename `total_listings` → `total_sold` to match its new meaning (confirmed-sold count, not
+  active-listing count) — `drizzle-kit generate`'s interactive rename-vs-create prompt couldn't be
+  driven non-interactively in this environment, and forcing a real column rename wasn't worth the
+  automation fight for a column with no real customer data in it yet. Left a comment on the field
+  documenting the name/meaning mismatch instead — a column named `total_listings` that now holds a
+  sold-item count is exactly the kind of thing worth flagging loudly rather than leaving as a silent trap.

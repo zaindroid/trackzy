@@ -4,11 +4,15 @@ import { Layout } from './components/Layout.js';
 import { LoginPage } from './pages/Login.js';
 import { OrdersPage } from './pages/Orders.js';
 import { OrderDetailPage } from './pages/OrderDetail.js';
+import { ListingsPage } from './pages/Listings.js';
 import { FulfillmentsPage } from './pages/Fulfillments.js';
 import { SuppliersPage } from './pages/Suppliers.js';
 import { SupplierDetailPage } from './pages/SupplierDetail.js';
 import { DisputesPage } from './pages/Disputes.js';
 import { SettingsPage } from './pages/Settings.js';
+import { ConnectionsPage } from './pages/Connections.js';
+import { ApprovalsPage } from './pages/Approvals.js';
+import { OpportunitiesPage } from './pages/Opportunities.js';
 
 export default function App() {
   const { token } = useAuthToken();
@@ -21,12 +25,16 @@ export default function App() {
     <Layout>
       <Routes>
         <Route path="/" element={<Navigate to="/orders" replace />} />
+        <Route path="/opportunities" element={<OpportunitiesPage />} />
         <Route path="/orders" element={<OrdersPage />} />
         <Route path="/orders/:id" element={<OrderDetailPage />} />
+        <Route path="/approvals" element={<ApprovalsPage />} />
+        <Route path="/listings" element={<ListingsPage />} />
         <Route path="/fulfillments" element={<FulfillmentsPage />} />
         <Route path="/suppliers" element={<SuppliersPage />} />
         <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
         <Route path="/disputes" element={<DisputesPage />} />
+        <Route path="/connections" element={<ConnectionsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/orders" replace />} />
       </Routes>

@@ -16,6 +16,55 @@ function newBucket(): TokenBucket {
   return new TokenBucket({ capacity: 8, refillPerSecond: 2 });
 }
 
+/** The actual `/auth/token/refresh` HTTP call — extracted so both `ensureFreshSession()` (5-min margin, called from real business methods) and the standalone keepalive cron (a much wider margin, since it may run only once a day — see `refreshAliExpressSessionIfStale` below) share one implementation rather than two copies of the same signing/parsing logic. */
+async function callRefreshEndpoint(env: AliExpressEnv, refreshToken: string, bucket: TokenBucket): Promise<AliExpressTokenSet> {
+  const path = '/auth/token/refresh';
+  const restAuthBaseUrl = env.ALIEXPRESS_REST_BASE_URL ?? 'https://api-sg.aliexpress.com/rest';
+  const params: Record<string, string> = {
+    app_key: env.ALIEXPRESS_APP_KEY ?? '',
+    timestamp: String(Date.now()),
+    sign_method: 'sha256',
+    refresh_token: refreshToken,
+  };
+  const sign = await signAliExpressParams(params, env.ALIEXPRESS_APP_SECRET ?? '', path);
+  const qs = new URLSearchParams({ ...params, sign });
+  const res = await fetchWithBackoff(`${restAuthBaseUrl}${path}?${qs.toString()}`, { method: 'GET' }, bucket);
+  if (!res.ok) {
+    throw new Error(`AliExpress OAuth token refresh failed: ${res.status} ${await res.text()}`);
+  }
+  const json = (await res.json()) as { access_token: string; refresh_token: string; expire_time: number; code?: string; message?: string };
+  if (json.code && json.code !== '0') {
+    throw new Error(`AliExpress OAuth token refresh failed: ${json.code} ${json.message ?? ''}`);
+  }
+  return { accessToken: json.access_token, refreshToken: json.refresh_token, expiresAt: json.expire_time };
+}
+
+/**
+ * Keepalive entry point for a supplier connection with no real order/price
+ * activity for a while — AliExpress's refresh-token validity window doesn't
+ * extend on use and is fixed from initial authorization (see the class
+ * docstring below), so an idle connection silently dies unless *something*
+ * refreshes it periodically regardless of real business traffic. Unlike
+ * `ensureFreshSession()`'s tight 5-minute margin (fine for real traffic,
+ * which happens many times a day), this takes an explicit, much wider
+ * margin so an infrequent cron (e.g. every 12h) reliably catches it — see
+ * `apps/worker/src/scheduled.ts`'s `ALIEXPRESS_KEEPALIVE_CRON`. No-ops
+ * (returns false) if the token isn't within `marginMs` of expiry yet.
+ */
+export async function refreshAliExpressSessionIfStale(
+  env: AliExpressEnv,
+  tokens: AliExpressTokenSet,
+  onTokenRefreshed: AliExpressOnTokenRefreshed,
+  marginMs: number,
+): Promise<boolean> {
+  if (tokens.expiresAt - marginMs > Date.now()) {
+    return false;
+  }
+  const refreshed = await callRefreshEndpoint(env, tokens.refreshToken, newBucket());
+  await onTokenRefreshed(refreshed);
+  return true;
+}
+
 /**
  * AliExpress Open Platform actually runs two different gateway families
  * (confirmed empirically against a live account, 2026-07 — see
@@ -58,36 +107,11 @@ export class RealAliExpressClient implements SupplierApiClient {
     return this.env.ALIEXPRESS_GATEWAY_URL ?? 'https://api-sg.aliexpress.com/sync';
   }
 
-  private restAuthBaseUrl(): string {
-    return this.env.ALIEXPRESS_REST_BASE_URL ?? 'https://api-sg.aliexpress.com/rest';
-  }
-
   private async ensureFreshSession(): Promise<string> {
     if (this.tokens.expiresAt - TOKEN_REFRESH_MARGIN_MS > Date.now()) {
       return this.tokens.accessToken;
     }
-    const path = '/auth/token/refresh';
-    const params: Record<string, string> = {
-      app_key: this.env.ALIEXPRESS_APP_KEY ?? '',
-      timestamp: String(Date.now()),
-      sign_method: 'sha256',
-      refresh_token: this.tokens.refreshToken,
-    };
-    const sign = await signAliExpressParams(params, this.env.ALIEXPRESS_APP_SECRET ?? '', path);
-    const qs = new URLSearchParams({ ...params, sign });
-    const res = await fetchWithBackoff(`${this.restAuthBaseUrl()}${path}?${qs.toString()}`, { method: 'GET' }, this.bucket);
-    if (!res.ok) {
-      throw new Error(`AliExpress OAuth token refresh failed: ${res.status} ${await res.text()}`);
-    }
-    const json = (await res.json()) as { access_token: string; refresh_token: string; expire_time: number; code?: string; message?: string };
-    if (json.code && json.code !== '0') {
-      throw new Error(`AliExpress OAuth token refresh failed: ${json.code} ${json.message ?? ''}`);
-    }
-    this.tokens = {
-      accessToken: json.access_token,
-      refreshToken: json.refresh_token,
-      expiresAt: json.expire_time,
-    };
+    this.tokens = await callRefreshEndpoint(this.env, this.tokens.refreshToken, this.bucket);
     await this.onTokenRefreshed(this.tokens);
     return this.tokens.accessToken;
   }
@@ -129,9 +153,25 @@ export class RealAliExpressClient implements SupplierApiClient {
     // directly. TODO(HUMAN): make country/currency/locale configurable
     // per-listing/storefront if you dropship to multiple markets with
     // materially different catalogs/pricing.
+    //
+    // KNOWN LIMITATION (confirmed live, 2026-07): `selection_search_product`
+    // does not behave like a real full-catalog keyword search — the exact
+    // same query returned a different, largely irrelevant set of "trending"
+    // products on repeated calls (a radio antenna, a cat water fountain
+    // filter, a capybara squishy toy... for a query about a silk eye mask).
+    // This looks like AliExpress's curated "Dropshipping Selection" feed
+    // (a much smaller, trend-driven catalog subset), not the full AliExpress
+    // marketplace. The match cascade's exact-SKU/fuzzy-title/embedding/LLM
+    // stages exist specifically to catch a bad candidate before it's ever
+    // auto-committed, but `findMatchCandidates()` (the manual-resolve
+    // picker) has no such filter — it just returns the top-N by score, which
+    // can all be irrelevant if nothing relevant came back from search at
+    // all. See DECISIONS.md for the investigation into replacing this with
+    // the AliExpress Affiliate API's `aliexpress.affiliate.product.query`,
+    // which does perform genuine keyword search against the full catalog.
     const data = await this.call<{
       aliexpress_ds_text_search_response: {
-        data: { products: { selection_search_product?: { itemId: string; title: string }[] } };
+        data: { products: { selection_search_product?: { itemId: string; title: string; image_url?: string }[] } };
       };
     }>('aliexpress.ds.text.search', {
       text: query,
@@ -141,7 +181,20 @@ export class RealAliExpressClient implements SupplierApiClient {
       local: this.env.ALIEXPRESS_DEFAULT_LOCALE ?? 'en_US',
     });
     const products = data.aliexpress_ds_text_search_response.data.products.selection_search_product ?? [];
-    return products.map((p) => ({ supplierProductId: p.itemId, title: p.title }));
+    // TODO(HUMAN): `image_url`'s exact field name is a best guess, unlike
+    // `itemId`/`title` above (both confirmed live) — this app's manual-match
+    // review flow (see DECISIONS.md) shows this image so a human can verify
+    // a match is actually correct, so confirm the real field name against a
+    // live search response and fix it here if it differs.
+    return products.map((p) => ({
+      supplierProductId: p.itemId,
+      title: p.title,
+      imageUrl: p.image_url,
+      // AliExpress's public product URL scheme (`/item/<id>.html`) is stable
+      // and has been for years — unlike image_url above, no live account
+      // needed to be confident in this one.
+      productUrl: `https://www.aliexpress.com/item/${p.itemId}.html`,
+    }));
   }
 
   async getOffer(supplierProductId: string): Promise<SupplierOffer> {

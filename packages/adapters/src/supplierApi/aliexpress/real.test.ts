@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { RealAliExpressClient } from './real.js';
+import { RealAliExpressClient, refreshAliExpressSessionIfStale } from './real.js';
 import type { AliExpressTokenSet } from './iface.js';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -81,6 +81,44 @@ describe('RealAliExpressClient — token refresh', () => {
   });
 });
 
+describe('refreshAliExpressSessionIfStale — keepalive cron entry point', () => {
+  it('refreshes and reports the new tokens when within the given (wide) margin of expiry, even though it would still pass a tight 5-min margin check', async () => {
+    // Expires in 10 hours — well outside ensureFreshSession's 5-min margin,
+    // but within a 12-hour keepalive margin, which is the whole point.
+    const tokens: AliExpressTokenSet = { accessToken: 'stale-ish', refreshToken: 'refresh-1', expiresAt: Date.now() + 10 * 3600_000 };
+    let refreshUrl: string | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        refreshUrl = String(input);
+        return jsonResponse({ access_token: 'kept-alive-token', refresh_token: 'kept-alive-refresh', expire_time: Date.now() + 86_400_000, code: '0' });
+      }),
+    );
+
+    let onRefreshedArg: AliExpressTokenSet | undefined;
+    const didRefresh = await refreshAliExpressSessionIfStale(ENV, tokens, async (t) => {
+      onRefreshedArg = t;
+    }, 12 * 3600_000);
+
+    expect(didRefresh).toBe(true);
+    expect(refreshUrl).toContain('/rest/auth/token/refresh');
+    expect(onRefreshedArg?.accessToken).toBe('kept-alive-token');
+    vi.unstubAllGlobals();
+  });
+
+  it('does nothing (no network call) when the token is not yet within the margin', async () => {
+    const tokens: AliExpressTokenSet = { accessToken: 'fine-for-now', refreshToken: 'refresh-1', expiresAt: Date.now() + 20 * 3600_000 };
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const didRefresh = await refreshAliExpressSessionIfStale(ENV, tokens, async () => undefined, 12 * 3600_000);
+
+    expect(didRefresh).toBe(false);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+});
+
 const FRESH_TOKENS: AliExpressTokenSet = { accessToken: 'session-token', refreshToken: 'refresh-1', expiresAt: Date.now() + 3600_000 };
 
 describe('RealAliExpressClient — searchProduct (real response shape, confirmed live)', () => {
@@ -104,7 +142,14 @@ describe('RealAliExpressClient — searchProduct (real response shape, confirmed
     expect(capturedBody?.get('countryCode')).toBe('US');
     expect(capturedBody?.get('currency')).toBe('USD');
     expect(capturedBody?.get('local')).toBe('en_US');
-    expect(results).toEqual([{ supplierProductId: '1005007498036927', title: 'Widget' }]);
+    expect(results).toEqual([
+      {
+        supplierProductId: '1005007498036927',
+        title: 'Widget',
+        imageUrl: undefined,
+        productUrl: 'https://www.aliexpress.com/item/1005007498036927.html',
+      },
+    ]);
     vi.unstubAllGlobals();
   });
 

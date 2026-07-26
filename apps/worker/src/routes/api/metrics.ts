@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { eq, inArray } from 'drizzle-orm';
-import { createDb, fulfillments, orders, storefronts } from '@fulfillment-tracker/db';
+import { createDb, fulfillments, listings, orders, storefronts } from '@fulfillment-tracker/db';
 import type { Env } from '../../env.js';
 import type { AuthedVariables } from '../../middleware/auth.js';
 
@@ -20,8 +20,14 @@ app.get('/', async (c) => {
       autoExtractedRegexPercent: 0,
       autoExtractedGeminiPercent: 0,
       exceptionsOpen: 0,
+      listingsTotal: 0,
+      listingsMatched: 0,
     });
   }
+
+  const allListings = await db.select({ supplierId: listings.supplierId }).from(listings).where(inArray(listings.storefrontId, sfIds));
+  const listingsTotal = allListings.length;
+  const listingsMatched = allListings.filter((l) => l.supplierId !== null).length;
 
   const allOrders = await db.select().from(orders).where(inArray(orders.storefrontId, sfIds));
   const orderIds = allOrders.map((o) => o.id);
@@ -51,6 +57,8 @@ app.get('/', async (c) => {
     autoExtractedRegexPercent,
     autoExtractedGeminiPercent,
     exceptionsOpen,
+    listingsTotal,
+    listingsMatched,
   });
 });
 

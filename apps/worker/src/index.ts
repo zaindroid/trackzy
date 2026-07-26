@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import type { Env } from './env.js';
 import shopifyWebhook from './routes/webhooks.shopify.js';
 import trackingWebhook from './routes/webhooks.tracking.js';
+import ebayDeletionWebhook from './routes/webhooks.ebay-deletion.js';
 import apiRoutes from './routes/api/index.js';
 import oauthRoutes from './routes/oauth.js';
 import { handleEmail } from './email.js';
@@ -28,6 +29,7 @@ app.use('/api/*', cors({ origin: '*', allowHeaders: ['Content-Type', 'Authorizat
 
 app.route('/webhooks/shopify', shopifyWebhook);
 app.route('/webhooks/17track', trackingWebhook);
+app.route('/webhooks/ebay-account-deletion', ebayDeletionWebhook);
 app.get('/api/health', (c) => c.json({ ok: true }));
 app.route('/api', apiRoutes);
 app.route('/oauth', oauthRoutes);

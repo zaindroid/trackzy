@@ -15,7 +15,8 @@
     "https://fulfillment-tracker.zainey4-26a.workers.dev/*",
     "https://www.amazon.com/*",
     "https://www.amazon.de/*",
-    "https://www.ebay.com/*"
+    "https://www.ebay.com/*",
+    "https://trackcaptain.com/*"
   ],
   "content_scripts": [
     {
@@ -26,6 +27,11 @@
     {
       "matches": ["https://www.ebay.com/*"],
       "js": ["content-ebay-tracking.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://trackcaptain.com/*"],
+      "js": ["content-trackcaptain.js"],
       "run_at": "document_idle"
     }
   ]

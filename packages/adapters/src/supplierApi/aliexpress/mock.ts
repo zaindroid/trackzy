@@ -18,7 +18,15 @@ export class MockAliExpressClient implements SupplierApiClient {
   private orderCounter = 0;
 
   async searchProduct(query: string): Promise<SupplierProduct[]> {
-    return [{ supplierProductId: `AE${(hashString(query) % 90000000) + 10000000}`, title: `${query} (AliExpress)` }];
+    const id = `AE${(hashString(query) % 90000000) + 10000000}`;
+    return [
+      {
+        supplierProductId: id,
+        title: `${query} (AliExpress)`,
+        imageUrl: `https://picsum.photos/seed/${id}/200/200`,
+        productUrl: `https://www.aliexpress.com/item/${id}.html`,
+      },
+    ];
   }
 
   async getOffer(supplierProductId: string): Promise<SupplierOffer> {

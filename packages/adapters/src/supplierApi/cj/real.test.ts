@@ -23,7 +23,9 @@ describe('RealCjClient — searchProduct (real endpoint shape, confirmed live)',
 
     expect(new URL(capturedUrl!).searchParams.get('productNameEn')).toBe('widget');
     expect(new URL(capturedUrl!).searchParams.has('productName')).toBe(false);
-    expect(results).toEqual([{ supplierProductId: 'p1', title: 'Widget' }]);
+    expect(results).toEqual([
+      { supplierProductId: 'p1', title: 'Widget', imageUrl: undefined, productUrl: 'https://www.cjdropshipping.com/product/-p-p1.html' },
+    ]);
     vi.unstubAllGlobals();
   });
 });

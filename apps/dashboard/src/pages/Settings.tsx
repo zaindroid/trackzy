@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthToken } from '../lib/auth.js';
 import { apiFetch, type Settings } from '../lib/api.js';
@@ -104,12 +105,14 @@ export function SettingsPage() {
         </div>
       </Panel>
 
-      <Panel title="Storefront & API keys">
+      <Panel title="Storefront & supplier connections">
         <p className="text-sm text-ink-muted">
-          Storefront access tokens, webhook secrets, and supplier API keys are managed as Cloudflare
-          Worker secrets, not through this screen — see <code className="font-mono">DEPLOY.md</code>{' '}
-          for the exact <code className="font-mono">wrangler secret put</code> commands. Real
-          credentials never pass through the database or the browser.
+          Connect your own eBay account and the suppliers you fulfill from on the{' '}
+          <Link to="/connections" className="font-medium text-signal hover:underline">
+            Connections
+          </Link>{' '}
+          page. Every credential is encrypted before it's stored — see{' '}
+          <code className="font-mono">DECISIONS.md</code> for how.
         </p>
       </Panel>
     </div>

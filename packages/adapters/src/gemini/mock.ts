@@ -10,6 +10,9 @@ import type {
   GeminiListingMatchResult,
   GeminiTitleSuggestionInput,
   GeminiTitleSuggestionResult,
+  OpportunityAnalysisInput,
+  OpportunityAnalysisResult,
+  RefineKeywordsInput,
 } from './iface.js';
 
 const TITLE_MAX_LENGTH = 80;
@@ -143,6 +146,26 @@ export class MockGeminiExtractor implements GeminiExtractor {
     return {
       suggestedTitle,
       reasoning: `Added missing searchable keyword(s) not present in the original title: ${missingTerms.join(', ')}.`,
+    };
+  }
+
+  async suggestRefinedKeywords(input: RefineKeywordsInput): Promise<string[]> {
+    const modifiers = ['premium', 'bulk pack', 'travel size', 'for kids', 'waterproof', 'wireless'];
+    return modifiers.map((m) => `${input.seedKeyword} ${m}`);
+  }
+
+  async analyzeOpportunity(input: OpportunityAnalysisInput): Promise<OpportunityAnalysisResult> {
+    const worthListing = input.avgPriceCents > 2000 && input.uniqueSellers < 20;
+    return {
+      verdict: worthListing
+        ? `"${input.keyword}" looks like a reasonable niche — decent pricing with manageable competition.`
+        : `"${input.keyword}" looks crowded or thin-margin — consider a narrower sub-keyword.`,
+      sellPriceMinCents: Math.round(input.avgPriceCents * 0.85),
+      sellPriceMaxCents: Math.round(input.avgPriceCents * 1.15),
+      targetSourcePriceCents: Math.round(input.avgPriceCents * 0.4),
+      marginEstimateCents: Math.round(input.avgPriceCents * 0.45),
+      risk: input.uniqueSellers > 20 ? 'High seller competition may compress margins.' : 'Low competition, but demand is unconfirmed beyond this sample.',
+      recommendedKeywords: [`${input.keyword} premium`, `${input.keyword} bundle`],
     };
   }
 }

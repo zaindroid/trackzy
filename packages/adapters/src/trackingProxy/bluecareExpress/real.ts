@@ -6,10 +6,15 @@ function newBucket(): TokenBucket {
 }
 
 /**
- * Bluecare Express tracking-proxy API. Endpoint shape follows the general
- * REST convention every other real adapter in this codebase uses (POST JSON,
- * bearer auth); TODO(HUMAN): verify the exact path and field names against
- * Bluecare Express's actual API docs once an account exists — see DEPLOY.md.
+ * DEAD PROVIDER — DO NOT WIRE THIS INTO PRODUCTION TRAFFIC. eBay removed
+ * Bluecare Express from its accepted carrier list (announced mid-2024,
+ * actively enforced through 2025 into 2026); uploading its output now gets
+ * policy defects (MC011) on every affected order, not protection from them.
+ * Kept only as a reference implementation / mock-parity fixture — see
+ * DECISIONS.md and DEPLOY.md section 14. `apps/worker/src/trackingUploader.ts`
+ * never calls this class; real conversion now goes through the manual
+ * TrackCaptain-claim queue instead (no provider in this space currently
+ * offers a real API — see DECISIONS.md for what was researched).
  */
 export class RealBluecareExpressClient implements TrackingProxyClient {
   private readonly bucket = newBucket();

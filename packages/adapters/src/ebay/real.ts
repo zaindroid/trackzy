@@ -1,3 +1,4 @@
+import { XMLParser } from 'fast-xml-parser';
 import type {
   OAuthTokenSet,
   OnTokenRefreshed,
@@ -9,6 +10,34 @@ import type {
 } from '../orderSource/iface.js';
 import { TokenBucket, fetchWithBackoff } from '../rateLimit.js';
 import type { EbayEnv } from './iface.js';
+
+// eBay's Trading API compatibility level as of this writing. TODO(HUMAN):
+// eBay periodically deprecates old compatibility levels — confirm this is
+// still accepted against a live account (a rejected level fails loudly with
+// an explicit "Invalid compatibility level" Ack=Failure error, not silently).
+const TRADING_API_COMPATIBILITY_LEVEL = 1193;
+
+// `parseTagValue: false` keeps every tag's text content as a string — eBay's
+// ItemID is a long numeric-looking string that must never be silently
+// coerced to a JS number (precision loss, plus every caller treats
+// externalListingId as an opaque string); numeric fields we actually need
+// (price, quantity) are converted explicitly at the call site instead.
+const xmlParser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', parseTagValue: false });
+
+function escapeXml(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+
+// Every field comes through as a string (see xmlParser's `parseTagValue: false`
+// above) — Quantity/CurrentPrice/QuantitySold are converted with Number(...)
+// at the point of use in listListings() below.
+interface TradingApiItem {
+  ItemID: string;
+  SKU?: string;
+  Title?: string;
+  Quantity?: string;
+  SellingStatus?: { CurrentPrice?: { '#text': string }; QuantitySold?: string };
+}
 
 const TOKEN_REFRESH_MARGIN_MS = 5 * 60_000; // refresh 5 minutes before actual expiry
 
@@ -165,6 +194,58 @@ export class RealEbayOrderSource implements OrderSource {
     return (await res.json()) as T;
   }
 
+  /**
+   * eBay's older XML Trading API — needed alongside the REST Sell APIs
+   * above because the REST Inventory API (`/sell/inventory/v1/*`) only ever
+   * sees listings created through its own SKU-based "multi-quantity"
+   * workflow. The vast majority of individual sellers list the traditional
+   * way (Seller Hub's normal "List an item" flow, bulk tools, etc.), and
+   * those "classic" listings simply don't exist as far as the Inventory API
+   * is concerned — confirmed live: a real connected account with active
+   * eBay listings returned `{"total":0}` from `GET inventory_item` (see
+   * DECISIONS.md). Trading API's `GetMyeBaySelling`/`ReviseFixedPriceItem`
+   * work by `ItemID` for both classic and Inventory-API-originated
+   * listings, so this replaces the REST-only listing read/update path
+   * entirely rather than maintaining two parallel code paths for two
+   * listing formats.
+   *
+   * Auth: eBay supports passing the same OAuth user access token used for
+   * the REST Sell APIs via the `X-EBAY-API-IAF-TOKEN` header instead of the
+   * legacy `<RequesterCredentials>` XML block — no separate Auth'n'Auth
+   * token needed. TODO(HUMAN): this is documented behavior but hasn't been
+   * exercised against a live account; confirm the token's granted scope
+   * covers Trading API's core listing calls (it should — this is the same
+   * `sell.inventory` scope already requested during connect).
+   */
+  private async tradingApiRequest<T>(callName: string, bodyXml: string): Promise<T> {
+    const accessToken = await this.ensureFreshToken();
+    const requestXml = `<?xml version="1.0" encoding="utf-8"?><${callName}Request xmlns="urn:ebay:apis:eBLBaseComponents">${bodyXml}</${callName}Request>`;
+    const res = await fetchWithBackoff(
+      `${this.baseUrl()}/ws/api.dll`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/xml',
+          'X-EBAY-API-COMPATIBILITY-LEVEL': String(TRADING_API_COMPATIBILITY_LEVEL),
+          'X-EBAY-API-CALL-NAME': callName,
+          'X-EBAY-API-SITEID': '0',
+          'X-EBAY-API-IAF-TOKEN': accessToken,
+        },
+        body: requestXml,
+      },
+      this.bucket,
+    );
+    if (!res.ok) {
+      throw new Error(`eBay Trading API call ${callName} failed: ${res.status} ${await res.text()}`);
+    }
+    const parsed = xmlParser.parse(await res.text()) as Record<string, unknown>;
+    const response = parsed[`${callName}Response`] as { Ack?: string; Errors?: unknown } | undefined;
+    if (response?.Ack === 'Failure') {
+      throw new Error(`eBay Trading API call ${callName} returned Ack=Failure: ${JSON.stringify(response.Errors)}`);
+    }
+    return response as T;
+  }
+
   async listNewOrders(since: number): Promise<OrderSourceOrder[]> {
     const sinceIso = new Date(since).toISOString();
     const filter = encodeURIComponent(`creationdate:[${sinceIso}..]`);
@@ -218,57 +299,56 @@ export class RealEbayOrderSource implements OrderSource {
   }
 
   async listListings(): Promise<OrderSourceListing[]> {
-    const data = await this.request<{
-      inventoryItems: {
-        sku: string;
-        product?: { title?: string };
-        availability?: { shipToLocationAvailability?: { quantity?: number } };
-      }[];
-    }>('/sell/inventory/v1/inventory_item?limit=100');
-
     const listings: OrderSourceListing[] = [];
-    for (const item of data.inventoryItems ?? []) {
-      const offerData = await this.request<{ offers: { offerId: string; pricingSummary?: { price?: { value: string } } }[] }>(
-        `/sell/inventory/v1/offer?sku=${encodeURIComponent(item.sku)}`,
+    const MAX_PAGES = 20; // 100/page — a 2,000-listing ceiling per sync pass is generous for this app's target sellers
+    let page = 1;
+
+    for (;;) {
+      const response = await this.tradingApiRequest<{
+        ActiveList?: {
+          ItemArray?: { Item?: TradingApiItem | TradingApiItem[] };
+          PaginationResult?: { TotalNumberOfPages?: string };
+        };
+      }>(
+        'GetMyeBaySelling',
+        `<ActiveList><Include>true</Include><Pagination><EntriesPerPage>100</EntriesPerPage><PageNumber>${page}</PageNumber></Pagination></ActiveList>`,
       );
-      const offer = offerData.offers?.[0];
-      listings.push({
-        externalListingId: offer?.offerId ?? item.sku,
-        sku: item.sku,
-        title: item.product?.title ?? item.sku,
-        priceCents: Math.round(Number.parseFloat(offer?.pricingSummary?.price?.value ?? '0') * 100),
-        quantityAvailable: item.availability?.shipToLocationAvailability?.quantity ?? 0,
-      });
+
+      const rawItems = response.ActiveList?.ItemArray?.Item;
+      const items = rawItems ? (Array.isArray(rawItems) ? rawItems : [rawItems]) : [];
+      for (const item of items) {
+        const currentPrice = Number(item.SellingStatus?.CurrentPrice?.['#text'] ?? 0);
+        const quantitySold = Number(item.SellingStatus?.QuantitySold ?? 0);
+        const quantity = Number(item.Quantity ?? 0);
+        listings.push({
+          externalListingId: item.ItemID,
+          sku: item.SKU || item.ItemID, // classic listings are frequently never assigned a SKU at all
+          title: item.Title ?? item.ItemID,
+          priceCents: Math.round(currentPrice * 100),
+          quantityAvailable: Math.max(0, quantity - quantitySold),
+        });
+      }
+
+      const totalPages = Number(response.ActiveList?.PaginationResult?.TotalNumberOfPages ?? 1);
+      if (page >= totalPages || page >= MAX_PAGES) break;
+      page += 1;
     }
+
     return listings;
   }
 
   async updateListing(externalListingId: string, input: UpdateListingInput): Promise<void> {
-    if (input.priceCents !== undefined) {
-      await this.request(`/sell/inventory/v1/offer/${encodeURIComponent(externalListingId)}`, {
-        method: 'PUT',
-        body: JSON.stringify({ pricingSummary: { price: { value: (input.priceCents / 100).toFixed(2), currency: 'USD' } } }),
-      });
-    }
-    if (input.quantityAvailable !== undefined) {
-      await this.request(`/sell/inventory/v1/offer/${encodeURIComponent(externalListingId)}/publish`, {
-        method: 'PUT',
-        body: JSON.stringify({ availableQuantity: input.quantityAvailable }),
-      });
-    }
-    if (input.title !== undefined) {
-      // TODO(HUMAN): unverified — a listing's title actually lives on eBay's
-      // `inventory_item` resource (keyed by SKU), not the `offer` resource
-      // this method otherwise updates (keyed by offer/listing id). This
-      // assumes `externalListingId` is usable as the inventory_item's SKU
-      // path segment, which needs confirming against a live account; if
-      // they're genuinely different identifiers, this call needs the actual
-      // SKU threaded in from the caller instead.
-      await this.request(`/sell/inventory/v1/inventory_item/${encodeURIComponent(externalListingId)}`, {
-        method: 'PUT',
-        body: JSON.stringify({ product: { title: input.title } }),
-      });
-    }
+    const fields = [
+      input.priceCents !== undefined ? `<StartPrice currencyID="USD">${(input.priceCents / 100).toFixed(2)}</StartPrice>` : '',
+      input.quantityAvailable !== undefined ? `<Quantity>${input.quantityAvailable}</Quantity>` : '',
+      input.title !== undefined ? `<Title>${escapeXml(input.title)}</Title>` : '',
+    ].join('');
+    if (!fields) return;
+
+    await this.tradingApiRequest(
+      'ReviseFixedPriceItem',
+      `<Item><ItemID>${escapeXml(externalListingId)}</ItemID>${fields}</Item>`,
+    );
   }
 
   async pauseListing(externalListingId: string): Promise<void> {

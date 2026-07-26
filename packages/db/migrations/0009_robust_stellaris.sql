@@ -1,0 +1,1 @@
+ALTER TABLE `supplier_offers` ADD `product_url` text;

@@ -2,9 +2,10 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import { createDb, listings, storefronts, supplierOffers, suppliers, users } from '@fulfillment-tracker/db';
 import { eq } from 'drizzle-orm';
-import { matchListing } from './matchListing.js';
+import { findMatchCandidates, matchListing } from './matchListing.js';
 
 const USER_ID = 'usr_match';
+const OTHER_USER_ID = 'usr_match_other';
 const STOREFRONT_ID = 'sf_match';
 const LISTING_ID = 'lst_match';
 
@@ -116,5 +117,59 @@ describe('matchListing', () => {
 
     const result = await matchListing(env, LISTING_ID);
     expect(result).toEqual({ supplierProductId: null, confidence: 0, source: null });
+  });
+
+  it("never matches against another tenant's supplier, even if it's active and API-matchable", async () => {
+    const db = createDb(env.DB);
+    await db.insert(users).values({ id: OTHER_USER_ID, clerkUserId: 'dev-user-match-other', email: 'match-other@test.dev', createdAt: 0 });
+    await db.insert(suppliers).values({
+      id: 'sup_match_other_tenant',
+      userId: OTHER_USER_ID,
+      name: 'Other Tenant CJ',
+      apiBaseUrl: 'https://developers.cjdropshipping.com',
+      apiKeyRef: 'env:CJ_API_KEY',
+      emailSenderPattern: '@cjdropshipping.com',
+      parserId: 'cj-dropshipping-v1',
+      active: 1,
+      createdAt: 0,
+      kind: 'api',
+      provider: 'cj',
+    });
+
+    const result = await matchListing(env, LISTING_ID);
+    expect(result).toEqual({ supplierProductId: null, confidence: 0, source: null });
+
+    const [listing] = await db.select().from(listings).where(eq(listings.id, LISTING_ID));
+    expect(listing?.supplierId).toBeNull();
+  });
+});
+
+describe('findMatchCandidates — the manual-resolve picker', () => {
+  it('never surfaces a candidate below the minimum relevance score, even when a supplier search returns something', async () => {
+    const db = createDb(env.DB);
+    await db.insert(suppliers).values({
+      id: 'sup_match_low_relevance',
+      userId: USER_ID,
+      name: 'CJ Dropshipping',
+      apiBaseUrl: 'https://developers.cjdropshipping.com',
+      apiKeyRef: 'env:CJ_API_KEY',
+      emailSenderPattern: '@cjdropshipping.com',
+      parserId: 'cj-dropshipping-v1',
+      active: 1,
+      createdAt: 0,
+      kind: 'api',
+      provider: 'cj',
+    });
+    // A single-character title produces an all-zero bigram embedding in the
+    // mock Gemini extractor (see gemini/mock.ts's mockEmbed) — cosine
+    // similarity against any candidate is deterministically 0, well under
+    // MIN_CANDIDATE_SCORE_FOR_REVIEW. Exercises exactly the failure mode
+    // confirmed live with AliExpress's search (see DECISIONS.md): a supplier
+    // search returning *something* doesn't mean it's relevant, and this
+    // function must not surface it regardless of how the score is produced.
+    await db.update(listings).set({ title: 'X' }).where(eq(listings.id, LISTING_ID));
+
+    const candidates = await findMatchCandidates(env, LISTING_ID);
+    expect(candidates).toEqual([]);
   });
 });

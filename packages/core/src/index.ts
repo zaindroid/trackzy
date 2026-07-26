@@ -8,3 +8,4 @@ export * from './trackingProxy.js';
 export * from './fuzzyMatch.js';
 export * from './matching.js';
 export * from './repricing.js';
+export * from './productOpportunity.js';

@@ -17,7 +17,15 @@ export class MockCjClient implements SupplierApiClient {
   private orderCounter = 0;
 
   async searchProduct(query: string): Promise<SupplierProduct[]> {
-    return [{ supplierProductId: `CJ${(hashString(query) % 900000) + 100000}`, title: `${query} (CJ Dropshipping)` }];
+    const id = `CJ${(hashString(query) % 900000) + 100000}`;
+    return [
+      {
+        supplierProductId: id,
+        title: `${query} (CJ Dropshipping)`,
+        imageUrl: `https://picsum.photos/seed/${id}/200/200`,
+        productUrl: `https://www.cjdropshipping.com/product/-p-${id}.html`,
+      },
+    ];
   }
 
   async getOffer(supplierProductId: string): Promise<SupplierOffer> {

@@ -5,7 +5,7 @@ import { RealAliExpressClient } from './real.js';
 import { MockAliExpressClient } from './mock.js';
 
 export * from './iface.js';
-export { RealAliExpressClient } from './real.js';
+export { RealAliExpressClient, refreshAliExpressSessionIfStale } from './real.js';
 export { MockAliExpressClient } from './mock.js';
 export { signAliExpressParams } from './sign.js';
 

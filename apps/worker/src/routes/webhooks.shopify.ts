@@ -56,10 +56,10 @@ app.post('/', async (c) => {
     return c.json({ error: { code: 'UNKNOWN_STOREFRONT', message: 'No storefront registered for this shop' } }, 404);
   }
 
-  // Storefront secrets are resolved via *_ref pointers; in this single-tenant
-  // dev/demo setup the ref is a literal `env:VAR_NAME` pointing at a process
-  // env var (see .dev.vars.example and DECISIONS.md).
-  const webhookSecret = resolveSecretRef(storefront.webhookSecretRef, c.env);
+  // Storefront secrets are resolved via *_ref pointers — see
+  // apps/worker/src/lib/secretRef.ts for the env:/enc:/literal shapes it
+  // supports.
+  const webhookSecret = await resolveSecretRef(storefront.webhookSecretRef, c.env);
   const valid = await verifyHmacSha256(webhookSecret, rawBody, hmacHeader);
   if (!valid) {
     return c.json({ error: { code: 'INVALID_SIGNATURE', message: 'HMAC verification failed' } }, 401);

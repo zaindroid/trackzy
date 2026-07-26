@@ -46,12 +46,21 @@ export function OrdersPage() {
       <PageHeader eyebrow="Manifest" title="Orders" description="Every order flowing through fulfillment today." />
 
       {metricsQuery.data && (
-        <div className="mb-8 grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="mb-8 grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-6">
+          <Link to="/listings" className="block hover:opacity-80">
+            <MetricTile
+              label="Listings"
+              value={`${metricsQuery.data.listingsMatched}/${metricsQuery.data.listingsTotal} matched`}
+            />
+          </Link>
           <MetricTile label="Orders today" value={String(metricsQuery.data.ordersToday)} />
           <MetricTile label="Avg margin" value={formatCents(metricsQuery.data.avgMarginCents)} />
           <MetricTile label="Regex-extracted" value={`${metricsQuery.data.autoExtractedRegexPercent}%`} />
           <MetricTile label="Gemini-extracted" value={`${metricsQuery.data.autoExtractedGeminiPercent}%`} />
           <MetricTile label="Open exceptions" value={String(metricsQuery.data.exceptionsOpen)} />
+          <Link to="/fulfillments" className="block hover:opacity-80">
+            <MetricTile label="Fulfillments" value="View all →" />
+          </Link>
         </div>
       )}
 

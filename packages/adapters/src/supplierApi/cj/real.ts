@@ -64,10 +64,23 @@ export class RealCjClient implements SupplierApiClient {
     // query returned 672 matches via `productName` vs 30,685 via
     // `productNameEn`. Since this app's catalog/titles are English, the
     // English-name field is the correct one to search.
-    const data = await this.request<{ list: { pid: string; productNameEn: string }[] }>(
+    const data = await this.request<{ list: { pid: string; productNameEn: string; productImage?: string }[] }>(
       `/product/list?productNameEn=${encodeURIComponent(query)}&pageSize=10`,
     );
-    return data.list.map((p) => ({ supplierProductId: p.pid, title: p.productNameEn }));
+    // TODO(HUMAN): `productImage` is CJ's commonly-documented field name for
+    // this list endpoint but hasn't been confirmed against a live response
+    // the way `pid`/`productNameEn` were — used by the manual-match review
+    // flow (see DECISIONS.md) so a human can visually verify a match.
+    // `productUrl` below is likewise an unverified guess at CJ's public
+    // product-page URL scheme (unlike AliExpress's, which is well-known and
+    // stable) — confirm against a live CJ product page and fix if it
+    // differs; a wrong link is worse than none, so don't trust this blindly.
+    return data.list.map((p) => ({
+      supplierProductId: p.pid,
+      title: p.productNameEn,
+      imageUrl: p.productImage,
+      productUrl: `https://www.cjdropshipping.com/product/-p-${p.pid}.html`,
+    }));
   }
 
   async getOffer(supplierProductId: string): Promise<SupplierOffer> {

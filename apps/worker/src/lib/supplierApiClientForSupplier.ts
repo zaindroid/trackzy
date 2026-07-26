@@ -9,6 +9,7 @@ import {
 } from '@fulfillment-tracker/adapters/supplierApi';
 import type { Env } from '../env.js';
 import { resolveSecretRef } from './secretRef.js';
+import { encryptCredential } from './credentialCrypto.js';
 
 /**
  * Resolves a `SupplierApiClient` for a given `suppliers` row. Amazon
@@ -29,16 +30,19 @@ export async function createSupplierApiClientForSupplier(
 ): Promise<SupplierApiClient> {
   if (supplier.provider === 'aliexpress') {
     const tokens: AliExpressTokenSet = {
-      accessToken: supplier.oauthAccessTokenRef ? resolveSecretRef(supplier.oauthAccessTokenRef, env) : '',
-      refreshToken: supplier.oauthRefreshTokenRef ? resolveSecretRef(supplier.oauthRefreshTokenRef, env) : '',
+      accessToken: supplier.oauthAccessTokenRef ? await resolveSecretRef(supplier.oauthAccessTokenRef, env) : '',
+      refreshToken: supplier.oauthRefreshTokenRef ? await resolveSecretRef(supplier.oauthRefreshTokenRef, env) : '',
       expiresAt: supplier.oauthExpiresAt ?? 0,
     };
     const onTokenRefreshed = async (refreshed: AliExpressTokenSet) => {
+      // Always re-encrypted on write — see the identical note in
+      // orderSourceForStorefront.ts. AliExpress rotates both tokens on every
+      // refresh (unlike eBay/Amazon), so both are re-encrypted here.
       await db
         .update(suppliers)
         .set({
-          oauthAccessTokenRef: refreshed.accessToken,
-          oauthRefreshTokenRef: refreshed.refreshToken,
+          oauthAccessTokenRef: await encryptCredential(env, refreshed.accessToken),
+          oauthRefreshTokenRef: await encryptCredential(env, refreshed.refreshToken),
           oauthExpiresAt: refreshed.expiresAt,
         })
         .where(eq(suppliers.id, supplier.id));

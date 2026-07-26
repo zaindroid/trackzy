@@ -7,7 +7,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "dev": "vite build --watch",
-    "build": "vite build && vite build --config vite.background.config.ts && vite build --config vite.content-checkout.config.ts && vite build --config vite.content-ebay-tracking.config.ts"
+    "build": "vite build && vite build --config vite.background.config.ts && vite build --config vite.content-checkout.config.ts && vite build --config vite.content-ebay-tracking.config.ts && vite build --config vite.content-trackcaptain.config.ts"
   },
   "dependencies": {
     "react": "^18.3.1",

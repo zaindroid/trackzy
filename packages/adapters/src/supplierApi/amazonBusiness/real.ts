@@ -52,10 +52,20 @@ export class RealAmazonBusinessClient implements SupplierApiClient {
   }
 
   async searchProduct(query: string): Promise<SupplierProduct[]> {
-    const data = await this.request<{ results: { asin: string; title: string }[] }>(
+    // TODO(HUMAN): `imageUrl` is an unverified guess, same caveat as the rest
+    // of this adapter (see the class docstring) — used by the manual-match
+    // review flow (see DECISIONS.md) so a human can visually verify a match.
+    const data = await this.request<{ results: { asin: string; title: string; imageUrl?: string }[] }>(
       `/v1/products/search?keywords=${encodeURIComponent(query)}`,
     );
-    return data.results.map((r) => ({ supplierProductId: r.asin, title: r.title }));
+    return data.results.map((r) => ({
+      supplierProductId: r.asin,
+      title: r.title,
+      imageUrl: r.imageUrl,
+      // Amazon's `/dp/<ASIN>` URL scheme is public and stable — unlike
+      // `imageUrl` above, no live account needed to be confident in this one.
+      productUrl: `https://www.amazon.com/dp/${r.asin}`,
+    }));
   }
 
   async getOffer(supplierProductId: string): Promise<SupplierOffer> {

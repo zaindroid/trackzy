@@ -111,6 +111,23 @@ export const webhookEvents = sqliteTable(
   }),
 );
 
+// --- multi-tenant self-serve connections: eBay/AliExpress OAuth start->callback state ---
+
+export const oauthConnectStates = sqliteTable(
+  'oauth_connect_states',
+  {
+    state: text('state').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    provider: text('provider', { enum: ['ebay', 'aliexpress'] }).notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => ({
+    providerCheck: check('oauth_connect_states_provider_check', sql`${t.provider} in ('ebay', 'aliexpress')`),
+  }),
+);
+
 export const orders = sqliteTable(
   'orders',
   {
@@ -142,6 +159,13 @@ export const orders = sqliteTable(
     rawPayloadId: text('raw_payload_id').references(() => webhookEvents.id),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
+    // Buyer shipping destination (marketplace orders only — see marketplaceSync.ts),
+    // JSON-serialized OrderSourceShipTo. Needed by the TrackCaptain tracking-proxy
+    // adapter, which matches/claims a real tracking number by destination
+    // city/state/zip/country rather than by converting an original tracking
+    // number the way the (now-dead) Bluecare Express/Aquiline providers did —
+    // see DECISIONS.md. Nullable: Shopify orders never populate this.
+    shipToJson: text('ship_to_json'),
   },
   (t) => ({
     storefrontExternalOrderUnique: uniqueIndex('orders_storefront_id_external_order_id_unique').on(
@@ -324,6 +348,15 @@ export const supplierOffers = sqliteTable('supplier_offers', {
   shipDays: real('ship_days'),
   score: real('score'),
   checkedAt: integer('checked_at').notNull(),
+  // Display-only fields so a human can actually see what product a match
+  // resolved to (title + photo) rather than just an opaque supplierProductId
+  // — added for the manual-match review flow (see DECISIONS.md). Nullable:
+  // not every supplier adapter maps an image, and older rows predate this.
+  productTitle: text('product_title'),
+  productImageUrl: text('product_image_url'),
+  // A link to the actual product page on the supplier's own site — the
+  // fallback (or supplement) when there's no image to verify a match by.
+  productUrl: text('product_url'),
 });
 
 // --- phase 2: MANUAL supplier / Buy Queue / Chrome extension flow ---
@@ -349,6 +382,79 @@ export const manualTasks = sqliteTable(
     stateCheck: check('manual_tasks_state_check', sql`${t.state} in ('pending', 'claimed', 'ordered', 'abandoned')`),
   }),
 );
+
+// --- one-click approval queue for api-kind suppliers (AliExpress, CJ) ---
+// manual-kind suppliers already have an equivalent human checkpoint via
+// manual_tasks/the Buy Queue; this is the same checkpoint for suppliers
+// whose order gets placed via a real API call instead of by hand — see
+// DECISIONS.md. Everything about the order (which supplier, cost, line
+// items) is precomputed autonomously; only the actual real-money
+// SupplierClient.createOrder() call itself waits for approval.
+export const pendingSupplierOrders = sqliteTable(
+  'pending_supplier_orders',
+  {
+    id: text('id').primaryKey(),
+    fulfillmentId: text('fulfillment_id')
+      .notNull()
+      .references(() => fulfillments.id),
+    orderId: text('order_id')
+      .notNull()
+      .references(() => orders.id),
+    supplierId: text('supplier_id')
+      .notNull()
+      .references(() => suppliers.id),
+    costCents: integer('cost_cents').notNull(),
+    lineItemsJson: text('line_items_json').notNull(),
+    status: text('status', { enum: ['pending', 'approved', 'rejected'] })
+      .notNull()
+      .default('pending'),
+    createdAt: integer('created_at').notNull(),
+    decidedAt: integer('decided_at'),
+  },
+  (t) => ({
+    statusCheck: check('pending_supplier_orders_status_check', sql`${t.status} in ('pending', 'approved', 'rejected')`),
+  }),
+);
+
+// --- product discovery: "what's worth listing" research, native to this app
+// (see DECISIONS.md) — built on real confirmed-SOLD eBay data (via an Apify
+// actor; eBay's own Marketplace Insights API, which covers this natively, is
+// gated behind a discretionary business approval this app doesn't have —
+// confirmed via research, not assumed). Scoring methodology ported directly
+// from the reference tool the user pointed at (packages/core/src/productOpportunity.ts).
+// One row per keyword scan; the `ai*` columns are only populated for a deep
+// search's winning keyword (see productOpportunities.ts), never for a plain scan.
+export const productOpportunities = sqliteTable('product_opportunities', {
+  id: text('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id),
+  keyword: text('keyword').notNull(),
+  // Column name predates the switch from active-listing counts to confirmed-
+  // sold counts (kept as-is rather than doing a rename migration) — this now
+  // holds the number of confirmed SOLD items found for the keyword, i.e. the
+  // sales-velocity signal `computeOpportunityScore` weights heaviest.
+  totalListings: integer('total_listings').notNull(),
+  uniqueSellers: integer('unique_sellers').notNull(),
+  avgPriceCents: integer('avg_price_cents').notNull(),
+  medianPriceCents: integer('median_price_cents').notNull(),
+  freeShippingPercent: real('free_shipping_percent').notNull(),
+  opportunityScore: real('opportunity_score').notNull(),
+  // JSON array of a few representative sold listings ({title, url, priceCents})
+  // for a human to sanity-check the scan.
+  sampleListingsJson: text('sample_listings_json').notNull(),
+  // Populated only for a deep search's winning keyword — see analyzeOpportunity
+  // in packages/adapters/src/gemini. Purely advisory, never auto-acted on.
+  aiVerdict: text('ai_verdict'),
+  aiSellPriceMinCents: integer('ai_sell_price_min_cents'),
+  aiSellPriceMaxCents: integer('ai_sell_price_max_cents'),
+  aiTargetSourcePriceCents: integer('ai_target_source_price_cents'),
+  aiMarginEstimateCents: integer('ai_margin_estimate_cents'),
+  aiRisk: text('ai_risk'),
+  aiRecommendedKeywordsJson: text('ai_recommended_keywords_json'),
+  scannedAt: integer('scanned_at').notNull(),
+  createdAt: integer('created_at').notNull(),
+});
 
 // --- phase 2: tracking conversion (Bluecare Express / Aquiline proxy) + event log ---
 
@@ -511,4 +617,8 @@ export const messageTemplatesRelations = relations(messageTemplates, ({ one, man
 export const messagesRelations = relations(messages, ({ one }) => ({
   order: one(orders, { fields: [messages.orderId], references: [orders.id] }),
   template: one(messageTemplates, { fields: [messages.templateId], references: [messageTemplates.id] }),
+}));
+
+export const productOpportunitiesRelations = relations(productOpportunities, ({ one }) => ({
+  user: one(users, { fields: [productOpportunities.userId], references: [users.id] }),
 }));

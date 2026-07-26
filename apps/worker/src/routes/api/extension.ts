@@ -1,10 +1,13 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import { and, desc, eq, inArray, isNotNull } from 'drizzle-orm';
 import { createDb, fulfillments, manualTasks, orders, storefronts, trackingEvents } from '@fulfillment-tracker/db';
+import { shouldRouteThroughTrackingProxy, type Carrier } from '@fulfillment-tracker/core';
 import type { Env } from '../../env.js';
 import type { AuthedVariables } from '../../middleware/auth.js';
 import { errorResponse } from '../../lib/errors.js';
 import { now } from '../../lib/id.js';
+import { completeManualProxyConversion } from '../../trackingUploader.js';
 
 /**
  * Endpoints the Manifest V3 Chrome Extension polls directly (spec 6d, 5a).
@@ -80,31 +83,122 @@ app.get('/pending-tracking-uploads', async (c) => {
     );
 
   // Prefer the most recent proxied tracking number/carrier over the
-  // fulfillment's raw one — e.g. an Amazon Logistics (TBA...) number must
-  // never reach eBay's DOM un-proxied (spec 7 hard rule). pushTrackingWithProxy
-  // always records this conversion in `tracking_events` before attempting the
-  // marketplace push, even when that push ends up deferred to this queue
-  // (NonApiModeError) — see DECISIONS.md.
-  const uploads = await Promise.all(
-    rows.map(async (f) => {
-      const [latestEvent] = await db
-        .select({ proxyTracking: trackingEvents.proxyTracking, proxyCarrier: trackingEvents.proxyCarrier })
-        .from(trackingEvents)
-        .where(and(eq(trackingEvents.fulfillmentId, f.id), isNotNull(trackingEvents.proxyTracking)))
-        .orderBy(desc(trackingEvents.createdAt))
-        .limit(1);
+  // fulfillment's raw one — e.g. an Amazon Logistics (TBA...) or
+  // AliExpress/Temu carrier must never reach eBay's DOM un-proxied (spec 7
+  // hard rule). A fulfillment that NEEDS proxying but has no proxied event
+  // yet is excluded entirely rather than falling back to its raw tracking
+  // number — this queue is "ready to paste into eBay," not "here's
+  // whatever we've got"; it surfaces separately from
+  // pending-tracking-proxy-conversions below until a human supplies a
+  // converted number.
+  const uploads = (
+    await Promise.all(
+      rows.map(async (f) => {
+        const [latestEvent] = await db
+          .select({ proxyTracking: trackingEvents.proxyTracking, proxyCarrier: trackingEvents.proxyCarrier })
+          .from(trackingEvents)
+          .where(and(eq(trackingEvents.fulfillmentId, f.id), isNotNull(trackingEvents.proxyTracking)))
+          .orderBy(desc(trackingEvents.createdAt))
+          .limit(1);
 
-      return {
-        fulfillmentId: f.id,
-        externalOrderId: orderById.get(f.orderId)?.externalOrderId,
-        externalOrderNumber: orderById.get(f.orderId)?.externalOrderNumber,
-        trackingNumber: latestEvent?.proxyTracking ?? f.trackingNumber,
-        carrier: latestEvent?.proxyCarrier ?? f.carrierFinal,
-      };
-    }),
-  );
+        if (!latestEvent && shouldRouteThroughTrackingProxy(f.carrierFinal as Carrier | null, 'ebay')) {
+          return null; // still awaiting a manual TrackCaptain claim — not safe to upload yet
+        }
+
+        return {
+          fulfillmentId: f.id,
+          externalOrderId: orderById.get(f.orderId)?.externalOrderId,
+          externalOrderNumber: orderById.get(f.orderId)?.externalOrderNumber,
+          trackingNumber: latestEvent?.proxyTracking ?? f.trackingNumber,
+          carrier: latestEvent?.proxyCarrier ?? f.carrierFinal,
+        };
+      }),
+    )
+  ).filter((u): u is NonNullable<typeof u> => u !== null);
 
   return c.json({ uploads });
+});
+
+/**
+ * The manual tracking-proxy-conversion queue: fulfillments whose tracking
+ * number eBay won't natively recognize (Amazon Logistics, or an
+ * AliExpress/Temu carrier — see shouldRouteThroughTrackingProxy) and that
+ * have no converted number recorded yet. No automated proxy API exists in
+ * production (Bluecare Express and Aquiline are both blocked by eBay — see
+ * DECISIONS.md), so a human claims a converted number by hand (e.g. via
+ * TrackCaptain's dashboard, see content/trackCaptain.ts) and submits it
+ * through the /complete endpoint below.
+ */
+app.get('/pending-tracking-proxy-conversions', async (c) => {
+  const db = createDb(c.env.DB);
+  const orderIds = await userOrderIds(db, c.get('userId'));
+  if (orderIds.length === 0) return c.json({ conversions: [] });
+
+  const relevantOrders = await db
+    .select({ id: orders.id, storefrontId: orders.storefrontId, externalOrderId: orders.externalOrderId, externalOrderNumber: orders.externalOrderNumber })
+    .from(orders)
+    .where(inArray(orders.id, orderIds));
+  const orderById = new Map(relevantOrders.map((o) => [o.id, o]));
+
+  const relevantStorefronts = await db
+    .select({ id: storefronts.id, platform: storefronts.platform })
+    .from(storefronts)
+    .where(inArray(storefronts.id, relevantOrders.map((o) => o.storefrontId)));
+  const platformByStorefrontId = new Map(relevantStorefronts.map((s) => [s.id, s.platform]));
+
+  const rows = await db
+    .select()
+    .from(fulfillments)
+    .where(and(inArray(fulfillments.orderId, orderIds), eq(fulfillments.pushedToStorefront, 0), isNotNull(fulfillments.trackingNumber)));
+
+  const conversions = (
+    await Promise.all(
+      rows.map(async (f) => {
+        const order = orderById.get(f.orderId);
+        const platform = order ? platformByStorefrontId.get(order.storefrontId) : undefined;
+        if (!order || !platform || !shouldRouteThroughTrackingProxy(f.carrierFinal as Carrier | null, platform)) return null;
+
+        const [existing] = await db
+          .select({ id: trackingEvents.id })
+          .from(trackingEvents)
+          .where(and(eq(trackingEvents.fulfillmentId, f.id), isNotNull(trackingEvents.proxyTracking)))
+          .limit(1);
+        if (existing) return null; // already converted — will surface in pending-tracking-uploads instead
+
+        return {
+          fulfillmentId: f.id,
+          externalOrderId: order.externalOrderId,
+          externalOrderNumber: order.externalOrderNumber,
+          originalTrackingNumber: f.trackingNumber,
+          originalCarrier: f.carrierFinal,
+        };
+      }),
+    )
+  ).filter((u): u is NonNullable<typeof u> => u !== null);
+
+  return c.json({ conversions });
+});
+
+const completeProxyConversionSchema = z.object({
+  trackingNumber: z.string().min(1),
+  carrier: z.string().min(1),
+});
+
+app.post('/pending-tracking-proxy-conversions/:fulfillmentId/complete', async (c) => {
+  const parsed = completeProxyConversionSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return errorResponse(c, 'VALIDATION_ERROR', parsed.error.message, 400);
+  }
+  const db = createDb(c.env.DB);
+  const orderIds = await userOrderIds(db, c.get('userId'));
+  const fulfillmentId = c.req.param('fulfillmentId');
+  const [fulfillment] = await db.select().from(fulfillments).where(eq(fulfillments.id, fulfillmentId));
+  if (!fulfillment || !orderIds.includes(fulfillment.orderId)) {
+    return errorResponse(c, 'NOT_FOUND', 'Fulfillment not found', 404);
+  }
+
+  const result = await completeManualProxyConversion(c.env, fulfillmentId, parsed.data.trackingNumber, parsed.data.carrier);
+  return c.json({ ok: true, ...result });
 });
 
 app.post('/pending-tracking-uploads/:fulfillmentId/complete', async (c) => {

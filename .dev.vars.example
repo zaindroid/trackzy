@@ -13,9 +13,12 @@ SHOPIFY_ACCESS_TOKEN=PLACEHOLDER__SHOPIFY_ACCESS_TOKEN
 SHOPIFY_WEBHOOK_SECRET=PLACEHOLDER__SHOPIFY_WEBHOOK_SECRET
 SHOPIFY_API_VERSION=2024-10
 
-# --- Google Gemini Flash (email-extraction fallback + dispute drafting ONLY) ---
+# --- Google Gemini (embeddings ONLY — text-similarity for listing matching) ---
 GEMINI_API_KEY=PLACEHOLDER__GEMINI_API_KEY
-GEMINI_MODEL=gemini-flash-latest
+
+# --- Groq (every LLM/JSON call site EXCEPT embeddings — see packages/adapters/src/gemini/iface.ts) ---
+GROQ_API_KEY=PLACEHOLDER__GROQ_API_KEY
+GROQ_MODEL=openai/gpt-oss-120b
 
 # --- 17TRACK carrier tracking events ---
 SEVENTEENTRACK_API_KEY=PLACEHOLDER__SEVENTEENTRACK_API_KEY
@@ -39,6 +42,10 @@ EBAY_OAUTH_ACCESS_TOKEN=PLACEHOLDER__EBAY_OAUTH_ACCESS_TOKEN
 EBAY_OAUTH_REFRESH_TOKEN=PLACEHOLDER__EBAY_OAUTH_REFRESH_TOKEN
 # Optional override; defaults to https://api.ebay.com
 # EBAY_API_BASE_URL=https://api.sandbox.ebay.com
+# Marketplace Account Deletion notification handshake — self-chosen shared
+# secret (not issued by eBay), registered alongside the endpoint URL in the
+# eBay Developer Portal. See DEPLOY.md section 8b.
+EBAY_DELETION_VERIFICATION_TOKEN=PLACEHOLDER__EBAY_DELETION_VERIFICATION_TOKEN
 
 # --- Amazon SP-API (orders, RDT-gated PII address access, feeds, listings) ---
 AMAZON_LWA_CLIENT_ID=PLACEHOLDER__AMAZON_LWA_CLIENT_ID
@@ -90,13 +97,25 @@ GMAIL_OAUTH_REFRESH_TOKEN=PLACEHOLDER__GMAIL_OAUTH_REFRESH_TOKEN
 # Optional override; defaults to https://gmail.googleapis.com
 # GMAIL_API_BASE_URL=
 
-# --- Tracking Conversion Middleware (Amazon Logistics -> eBay proxy) ---
+# --- Tracking Conversion Middleware (unrecognized-carrier -> eBay proxy) ---
 # Selects which proxy provider createTrackingProxyClient() uses; defaults to
-# bluecare_express. Set to "aquiline" to use the alternate provider instead.
-# TRACKING_PROXY_PROVIDER=bluecare_express
+# tracktaco (chosen over trackcaptain after live comparison — see
+# DECISIONS.md). Bluecare Express and Aquiline are both blocked by eBay and
+# should not be used. Set TRACKING_PROXY_PROVIDER to "trackcaptain" to use
+# that instead (also fully wired), or "bluecare_express"/"aquiline" only if
+# you have a specific reason to revive a dead provider.
+TRACKTACO_API_KEY=PLACEHOLDER__TRACKTACO_API_KEY
+# TRACKING_PROXY_PROVIDER=trackcaptain
+TRACKCAPTAIN_API_KEY=PLACEHOLDER__TRACKCAPTAIN_API_KEY
 BLUECARE_EXPRESS_API_KEY=PLACEHOLDER__BLUECARE_EXPRESS_API_KEY
 AQUILINE_API_KEY=PLACEHOLDER__AQUILINE_API_KEY
 
 # --- Gemini embeddings (SKU/listing fuzzy-match cascade, embedding stage) ---
-# Optional override; defaults to text-embedding-004
-# GEMINI_EMBEDDING_MODEL=text-embedding-004
+# Optional override; defaults to gemini-embedding-001
+# GEMINI_EMBEDDING_MODEL=gemini-embedding-001
+
+# --- Multi-tenant self-serve connections (customer OAuth tokens/API keys encrypted at rest) ---
+# A real 256-bit key, base64-encoded (generate with: openssl rand -base64 32).
+# Required before any customer connects their own eBay/AliExpress/CJ account —
+# apps/worker/src/lib/credentialCrypto.ts throws without it. See DEPLOY.md.
+CREDENTIAL_ENCRYPTION_KEY=PLACEHOLDER__CREDENTIAL_ENCRYPTION_KEY

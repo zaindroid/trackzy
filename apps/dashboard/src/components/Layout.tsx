@@ -1,13 +1,19 @@
 import { useState, type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuthToken } from '../lib/auth.js';
 import { useTheme } from '../lib/theme.js';
+import { apiFetch, type PendingSupplierOrder } from '../lib/api.js';
 
 const NAV_ITEMS = [
+  { to: '/opportunities', label: 'Opportunities' },
   { to: '/orders', label: 'Orders' },
+  { to: '/approvals', label: 'Approvals', badge: true },
+  { to: '/listings', label: 'Listings' },
   { to: '/fulfillments', label: 'Fulfillments' },
   { to: '/suppliers', label: 'Suppliers' },
   { to: '/disputes', label: 'Disputes' },
+  { to: '/connections', label: 'Connections' },
   { to: '/settings', label: 'Settings' },
 ];
 
@@ -20,7 +26,19 @@ function Wordmark() {
   );
 }
 
+function usePendingApprovalCount(): number {
+  const { token } = useAuthToken();
+  const query = useQuery({
+    queryKey: ['pendingSupplierOrders'],
+    queryFn: () => apiFetch<{ pendingSupplierOrders: PendingSupplierOrder[] }>('/pending-supplier-orders', token),
+    refetchInterval: 30_000,
+  });
+  return query.data?.pendingSupplierOrders.filter((p) => p.status === 'pending').length ?? 0;
+}
+
 function NavList({ onNavigate }: { onNavigate?: () => void }) {
+  const pendingCount = usePendingApprovalCount();
+
   return (
     <nav className="flex flex-col gap-0.5">
       {NAV_ITEMS.map((item) => (
@@ -29,14 +47,17 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
           to={item.to}
           onClick={onNavigate}
           className={({ isActive }) =>
-            `border-l-2 px-3 py-2 text-sm font-medium transition-colors ${
+            `flex items-center justify-between border-l-2 px-3 py-2 text-sm font-medium transition-colors ${
               isActive
                 ? 'border-signal text-ink'
                 : 'border-transparent text-ink-muted hover:border-rule hover:text-ink'
             }`
           }
         >
-          {item.label}
+          <span>{item.label}</span>
+          {item.badge && pendingCount > 0 && (
+            <span className="rounded-sm bg-signal px-1.5 py-0.5 text-xs font-semibold text-signal-ink">{pendingCount}</span>
+          )}
         </NavLink>
       ))}
     </nav>

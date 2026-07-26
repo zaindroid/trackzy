@@ -22,6 +22,10 @@ export interface SupplierProduct {
   supplierProductId: string;
   title: string;
   sku?: string;
+  /** Best-effort — lets a human visually verify a match is actually correct (see DECISIONS.md). Not every supplier maps one. */
+  imageUrl?: string;
+  /** A link to the actual product page on the supplier's own site — the fallback when there's no image (or even alongside one) to verify a match is correct. */
+  productUrl?: string;
 }
 
 export interface SupplierOffer {

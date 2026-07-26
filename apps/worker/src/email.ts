@@ -4,8 +4,8 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { detectCarrier } from '@fulfillment-tracker/core';
 import type { Env } from './env.js';
 import { newId, now } from './lib/id.js';
-import { safeGetWorkflowInstance } from './lib/workflow.js';
 import { extractTrackingCandidate } from './lib/extractTrackingCandidate.js';
+import { notifyTrackingReceived } from './lib/notifyTrackingReceived.js';
 import type { TrackingReceivedEvent } from './workflows/types.js';
 
 /**
@@ -109,7 +109,6 @@ export async function handleEmail(message: ForwardableEmailMessage, env: Env): P
     .where(eq(fulfillments.id, fulfillment.id));
 
   if (!detection.needsReview) {
-    const instance = await safeGetWorkflowInstance(env.ORDER_WORKFLOW, fulfillment.orderId);
     const event: TrackingReceivedEvent = {
       fulfillmentId: fulfillment.id,
       trackingNumber: candidate.trackingNumber,
@@ -117,7 +116,7 @@ export async function handleEmail(message: ForwardableEmailMessage, env: Env): P
       sku: candidate.sku,
       source,
     };
-    await instance?.sendEvent({ type: 'tracking-received', payload: event });
+    await notifyTrackingReceived(env, db, fulfillment.id, fulfillment.orderId, event);
   }
 }
 

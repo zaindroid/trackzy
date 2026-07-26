@@ -78,16 +78,28 @@ custom-app admin at `https://<shop>.myshopify.com/admin/settings/apps/developmen
 4. Point your suppliers' shipping-notification emails (or a forwarding rule from your real inbox) at
    this address.
 
-## 5. Google Gemini API key
+## 5. Google Gemini (embeddings) + Groq (everything else)
 
-**TODO(HUMAN)**: Create an API key at [Google AI Studio](https://aistudio.google.com/apikey) (or via
-Google Cloud Console → Vertex AI, if using the Vertex-backed endpoint instead of the public
-`generativelanguage.googleapis.com` one already wired in `packages/adapters/src/gemini/real.ts`).
+**Split across two providers** (see DECISIONS.md for why): Gemini's free tier turned out to be too
+tight for even light production use (20 `generate_content` requests/day) — everything that used to be
+a Gemini chat call now runs on Groq instead, whose free tier (14,400 requests/day) has real headroom.
+Gemini has no substitute for embeddings though (Groq doesn't offer an embeddings API at all), so
+`embedText` — the SKU/listing match cascade's cosine-similarity stage — stays on Gemini, whose
+`embedContent` quota is tracked separately and wasn't the thing that ran out.
+
+**TODO(HUMAN)**: Create a Gemini API key at [Google AI Studio](https://aistudio.google.com/apikey), and
+a Groq API key at [console.groq.com/keys](https://console.groq.com/keys). Set both:
 ```
 pnpm --filter @fulfillment-tracker/worker exec wrangler secret put GEMINI_API_KEY --config ../../wrangler.toml
+pnpm --filter @fulfillment-tracker/worker exec wrangler secret put GROQ_API_KEY --config ../../wrangler.toml
 ```
-Gemini is called from exactly two places (hard architectural rule) — email-extraction fallback and
-dispute-email drafting — never in the margin/pricing path.
+Both are required — `createGeminiExtractor` falls back to its mock unless both `GEMINI_API_KEY` and
+`GROQ_API_KEY` look real (same multi-secret gate convention as eBay's `CLIENT_ID`+`CLIENT_SECRET`).
+Called from exactly five chat/JSON places (hard architectural rule, unchanged by the Groq move) —
+email-extraction fallback, dispute-email drafting, SKU/listing matching (ambiguous cases only), carrier
+exception triage (ambiguous cases only), and listing title optimization — never in the margin/pricing
+path. `embedText` (SKU/listing matching's embedding-similarity stage) is a sixth, separate call not
+counted among those five since it's not itself a decision, just a vector.
 
 ## 6. 17TRACK API key
 
@@ -118,15 +130,88 @@ The publishable key is not secret — set it as a build-time env var for the das
 (`apps/dashboard/.env.production`: `VITE_CLERK_PUBLISHABLE_KEY=pk_live_...`) before running
 `pnpm build`. Once `VITE_CLERK_PUBLISHABLE_KEY` is a real (non-`PLACEHOLDER__`) key, the dashboard
 automatically switches from the "Continue as dev user" mock login to Clerk's hosted `<SignIn />`
-(`apps/dashboard/src/lib/clerkAuth.tsx`). You'll also need to create a `users` row whose
-`clerk_user_id` matches the real Clerk user id (the mock's `dev-user` convention doesn't apply once
-Clerk is live) — either via `wrangler d1 execute ... --remote` or a small onboarding endpoint you add.
+(which also surfaces "Sign up" — no separate config needed) (`apps/dashboard/src/lib/clerkAuth.tsx`).
+
+**No manual `users` row needed.** `authMiddleware` (`apps/worker/src/middleware/auth.ts`) auto-
+provisions a `users` row the first time a cryptographically-valid Clerk session hits any API route
+with no matching row yet — this is what makes real customer self-signup work end-to-end. It fetches
+the user's email from Clerk's Backend API (`fetchClerkUserEmail` in
+`packages/adapters/src/clerk/real.ts`) via a raw `fetch` against `https://api.clerk.com/v1/users/:id`
+— deliberately *not* `createClerkClient().users.getUser()`, because that SDK call pulls in
+`snakecase-keys` -> `map-obj`, which throws `Cannot use require() to import an ES Module` under the
+Workers runtime's CJS/ESM interop (this bit in both vitest-pool-workers and is a known class of issue
+for real workerd too — same family as the dynamic-import workaround already used for `verifyToken`,
+except this one fires at call time, not bundle time, so dynamic import alone doesn't dodge it). If
+the email fetch fails for any reason, provisioning still succeeds with a `<clerk_user_id>@unknown.clerk.user`
+placeholder rather than blocking signup. Auto-provisioning only runs for real (non-mock) sessions —
+in mock mode any bearer string verifies as valid, so provisioning there would create a user for a
+typo'd token instead of correctly rejecting it.
+
+## 7b. Multi-tenant self-serve connections (customers connect their own accounts)
+
+**Resolved (2026-07).** Every marketplace/supplier below used to require a developer to run each
+provider's OAuth consent flow by hand and paste the resulting tokens into `wrangler secret put`.
+That still works for *your own* account (sections 8–12 below), but real customers now connect their
+own eBay/AliExpress/CJ accounts themselves, through the dashboard's **Connections** page — no shell
+access, no secrets, no copy-pasting tokens.
+
+**What changed under the hood** (see DECISIONS.md for the full reasoning):
+- `apps/worker/src/lib/credentialCrypto.ts` — every customer-supplied OAuth token/API key is
+  AES-256-GCM encrypted before it touches D1, under one master key (`CREDENTIAL_ENCRYPTION_KEY`, a
+  Worker secret — **not** a customer credential itself). `resolveSecretRef` transparently decrypts
+  `enc:v1:...` values alongside the existing `env:VAR_NAME` convention (your own app-level secrets,
+  unaffected).
+- `POST /api/connections/manual` (Amazon Retail, Temu — no credentials at all, just a Buy Queue
+  supplier row), `POST /api/connections/cj` (paste a raw CJ API key, server exchanges it once), and
+  `GET /api/connections/{ebay,aliexpress}/start` + the matching `/oauth/{ebay,aliexpress}/callback`
+  (real OAuth, replacing the old manual copy-paste landing pages).
+- A new `oauth_connect_states` table ties an OAuth provider's redirect back to the specific user who
+  clicked "Connect" — necessary because a provider's callback can't carry a Bearer token the way
+  every other `/api/*` route requires.
+
+**TODO(HUMAN) — what you still need to do**: the `/start` endpoints need *your own* eBay/AliExpress
+developer app credentials configured (one app, servicing every customer's individual OAuth grant —
+you do **not** need a separate registered app per customer):
+```
+pnpm --filter @fulfillment-tracker/worker exec wrangler secret put EBAY_CLIENT_ID --config ../../wrangler.toml
+pnpm --filter @fulfillment-tracker/worker exec wrangler secret put EBAY_CLIENT_SECRET --config ../../wrangler.toml
+pnpm --filter @fulfillment-tracker/worker exec wrangler secret put EBAY_RUNAME --config ../../wrangler.toml
+```
+`EBAY_RUNAME` is eBay's own redirect-URI concept — register one in the eBay Developer Portal pointing
+at `https://<your-worker>.workers.dev/oauth/ebay/callback`, then set its RuName value here (not the
+literal URL — see section 8's eBay Keyset setup if you haven't registered a Production keyset yet).
+`ALIEXPRESS_APP_KEY`/`ALIEXPRESS_APP_SECRET` (section 11) double as this flow's AliExpress app
+credentials too — no separate setup needed there. **Until these are set, the eBay/AliExpress
+"Connect" buttons on the Connections page return a clear "not configured yet" error rather than
+failing silently.**
+
+Also still open: Amazon Business API isn't exposed as a self-serve option at all — it requires each
+customer's own private agreement with Amazon, which can't be automated (see DECISIONS.md). Amazon
+Retail (manual/Buy-Queue) covers "Amazon" for customers instead.
+
+## 7c. One-click approval queue for api-kind supplier orders (AliExpress, CJ)
+
+**Resolved (2026-07).** Every step of order fulfillment runs autonomously exactly as before —
+margin evaluation, supplier matching, cost computation — but the actual money-spending API call to
+place an order with an `api`-kind supplier (AliExpress, CJ) no longer fires immediately. It queues
+in a `pending_supplier_orders` row instead, and the dashboard's **Approvals** page shows exactly what
+was decided (supplier, line items, cost) with a single "Approve & place order" button — click it,
+and *that* triggers the real `SupplierClient.createOrder()` call. Reject instead, and the supplier is
+never contacted at all.
+
+`manual`-kind suppliers (Amazon Retail, Temu) already had an equivalent human checkpoint for free —
+a person places the order by hand via the Buy Queue — so this only needed building for the suppliers
+where a real API call happens with zero human involvement today. No setup required: this is on by
+default for every `api`-kind supplier, nothing to configure. `apps/worker/src/lib/placeSupplierOrder.ts`
+has the full `approveSupplierOrder`/`rejectSupplierOrder` implementation, both idempotent against a
+duplicate click or an already-decided row.
 
 ---
 
 # Phase 2 — Multi-Marketplace Dropshipping Automation
 
-Everything below is additive to Phase 1's setup above. All of it stays mock-backed
+Everything below is additive to Phase 1's setup above — and, as of section 7b, describes *your own*
+account's setup; real customers use the Connections page instead. All of it stays mock-backed
 (`MOCK_MODE=true`, or per-adapter `PLACEHOLDER__` key detection) until you actually work through
 these steps — none of it is required for `pnpm dev` / `pnpm test`.
 
@@ -167,6 +252,64 @@ account, leave `non_api_mode = 1`. `pushTracking` will throw `NonApiModeError` (
 `trackingUploader.ts`, not an error), and the tracking number instead surfaces at
 `GET /api/extension/pending-tracking-uploads` for The Edge Agent (the Chrome extension, section 12
 below) to paste into eBay's own "Add tracking" page by hand.
+
+**Order ingestion is automatic once the storefront row exists.** `apps/worker/src/marketplaceSync.ts`
+polls every `ebay`/`amazon` storefront's `OrderSource.listNewOrders()` on its own cron
+(`*/10 * * * *`, see `scheduled.ts`'s `MARKETPLACE_POLL_CRON`) — this didn't exist before 2026-07;
+`OrderSource` was fully implemented but nothing called it. For each new order it matches every line
+item's SKU against the `listings`/`supplier_offers` catalog-matching tables (section 11 below — a
+listing has to actually be matched to a supplier first, or the order goes to `exception` for manual
+resolution instead of guessing), evaluates margin against the real per-SKU cost, and — if it clears
+your threshold — places the supplier order per matched supplier (`api` kind calls the supplier's real
+API; `manual` kind, i.e. Amazon Retail/AliExpress/Temu, creates a `manual_tasks` row for the Buy Queue
+instead, carrying the buyer's `shipTo` through for the extension's paste-address flow).
+
+**Listing sync is also automatic — nothing to seed by hand.** You never need to manually insert a
+`listings` row for a real customer's own account. This is read-only, matching this app's actual scope:
+it never creates or publishes a listing, only reads the ones a seller already made and edits their
+price/quantity/title (see the "Automated ordering" description on the Connections page and
+`apps/worker/src/catalog/listingsSync.ts`'s `syncListingsForStorefront()`). A customer's existing
+eBay listings sync in three ways: immediately on connect (`/oauth/ebay/callback`, best-effort — a
+failure here doesn't block the connection), on a dedicated `LISTINGS_SYNC_CRON` every 2 minutes
+(deliberately tighter than order polling — see DECISIONS.md), and on demand via the "Sync listings now"
+button on the Connections page (`POST /api/listings/sync`). Every newly-synced listing that isn't
+matched to a supplier yet is run through the `matchListing()` cascade automatically, scoped strictly to
+that customer's own connected suppliers.
+
+**eBay listings are read via the Trading API, not the REST Inventory API** (see DECISIONS.md) — the
+REST Inventory API (`/sell/inventory/v1/*`) only sees listings created through its own SKU-based
+workflow, which most individual sellers never use. `RealEbayOrderSource` calls the older XML Trading
+API (`GetMyeBaySelling`/`ReviseFixedPriceItem`) instead, authenticated with the same OAuth user access
+token via the `X-EBAY-API-IAF-TOKEN` header — no separate Auth'n'Auth token needed, no extra setup
+required beyond the OAuth connect flow already in section 7b.
+
+**A listing the auto-match cascade can't confidently resolve doesn't get stuck** — the Listings page's
+"Resolve" action (`GET`/`POST /api/listings/:id/candidates` and `/:id/match`) shows a human 2-4 scored
+candidate products (with photo, title, price) pulled live from your connected suppliers, to either pick
+the right one or explicitly confirm "no match" — see DECISIONS.md. **TODO(HUMAN)**: the image URL field
+name is an unverified guess for AliExpress (`image_url`) and Amazon Business (`imageUrl`); CJ's
+(`productImage`) is commonly documented but likewise unconfirmed against a live response — check these
+once you have a live search response from each and fix `packages/adapters/src/supplierApi/*/real.ts` if
+they differ. Missing images just show a "No image" placeholder, never break anything. Each candidate
+also links out to the actual product page on the supplier's site (`productUrl`) — AliExpress's and
+Amazon's URL schemes are stable/public and trustworthy as-is; **CJ's is an unverified guess too** and
+may need fixing in the same file once you can check it against a real CJ product page.
+
+## 8b. eBay Marketplace Account Deletion/Closure notification (required to enable a Production keyset)
+
+**Resolved (2026-07).** eBay disables every new Production keyset until this is handled, one way or
+another. **We didn't take the exemption** — this system genuinely stores eBay buyer PII (name +
+shipping address, flowing through `OrderSourceOrder.shipTo` into `manual_tasks.payload_json` for the
+Buy Queue flow), so the exemption's "we don't process eBay user data" claim wouldn't be true. Instead,
+`apps/worker/src/routes/webhooks.ebay-deletion.ts` implements the real endpoint: eBay's one-time
+ownership-verification handshake (GET, `?challenge_code=...`) plus the actual deletion notification
+(POST), which redacts the matching buyer's name/address out of every `manual_tasks` row tied to an
+eBay storefront. `EBAY_DELETION_VERIFICATION_TOKEN` is live as a Worker secret, the endpoint URL +
+token are registered in the eBay Developer Portal, eBay's ownership-verification GET passed (keyset's
+compliance banner cleared), and a real "Send Test Notification" payload confirmed the handler's
+`notification.data.username` field-name assumption was correct — see DECISIONS.md for the full record,
+including one portal quirk (the endpoint/token fields stay greyed out until OAuth is enabled on the
+keyset, unrelated to the notify-on-failure email field above them).
 
 ## 9. Amazon SP-API (orders, RDT-gated address access, feeds, listings)
 
@@ -226,6 +369,20 @@ below) is unavoidable roughly every 2 days**, no matter how often the automatic 
 no way to keep this integration connected purely automatically long-term. Budget for redoing step 2
 periodically (or build a reminder for yourself) until/unless a future version adds a
 notification when the refresh token is close to its hard expiry.
+
+**Known limitation: product search (`searchProduct`, used by the SKU/listing match cascade) doesn't
+return relevant results.** Confirmed live — `aliexpress.ds.text.search`'s `selection_search_product`
+looks like AliExpress's curated "Dropshipping Selection" feed, not a real full-catalog keyword search;
+the same query returns a different, mostly irrelevant set of products on repeated calls. A minimum
+relevance cutoff (`MIN_CANDIDATE_SCORE_FOR_REVIEW` in `matchListing.ts`) stops obviously-wrong
+candidates from reaching the manual-match picker, but doesn't fix the underlying search quality — for
+this specific supplier, expect the auto-cascade to rarely find a confident match, and the manual picker
+to sometimes come up empty even when a good product genuinely exists on AliExpress. **TODO(HUMAN)**: the
+real fix is AliExpress's Affiliate API (`aliexpress.affiliate.product.query`, genuine keyword search),
+but it requires a *separate* signup at the [AliExpress Affiliate Portal](https://portals.aliexpress.com/)
+(distinct from the Open Platform app above, ~1-3 business day approval) to obtain a `tracking_id`
+required on every call — not something this app's current AliExpress app approval covers, and not
+something a code change alone can unlock. See DECISIONS.md for the full investigation.
 
 1. Register the app, get `ALIEXPRESS_APP_KEY` / `ALIEXPRESS_APP_SECRET`.
 2. Run AliExpress's OAuth authorization flow once (as the specific AliExpress account that will
@@ -305,31 +462,104 @@ consent flow). Then:
    further manual step is needed. Read-only scope is deliberate — this integration never sends,
    modifies, or deletes anything in your inbox.
 
-## 14. Tracking Conversion Middleware (Bluecare Express / Aquiline)
+## 14. Tracking Conversion Middleware — cascades TrackTaco → TrackCaptain; Bluecare Express / Aquiline are dead
 
-**TODO(HUMAN)**: This step is **mandatory before going live with any Amazon → eBay dropshipping
-route** — the hard architectural rule requires Amazon Logistics (`TBA...`) tracking numbers destined
-for an eBay buyer to be proxied through one of these two providers, never pushed to eBay raw (eBay's
-policies prohibit exposing Amazon as the shipper). Pick one:
-- [Bluecare Express](https://www.bluecareexpress.com/) (default provider) — register an account, get
-  an API key, set:
-  ```
-  pnpm --filter @fulfillment-tracker/worker exec wrangler secret put BLUECARE_EXPRESS_API_KEY --config ../../wrangler.toml
-  ```
-- [Aquiline](https://aquiline.com/) (alternate provider) — register, get an API key, set:
-  ```
-  pnpm --filter @fulfillment-tracker/worker exec wrangler secret put AQUILINE_API_KEY --config ../../wrangler.toml
-  pnpm --filter @fulfillment-tracker/worker exec wrangler secret put TRACKING_PROXY_PROVIDER --config ../../wrangler.toml
-  ```
-  (set the value of `TRACKING_PROXY_PROVIDER` to the literal string `aquiline`; omit it entirely to
-  keep the Bluecare Express default).
+**Resolved (2026-07), fully automated.** **Bluecare Express and Aquiline no longer work** — eBay
+removed both from its accepted carrier list (Bluecare: announced mid-2024, enforced through
+2025–2026; Aquiline: the same crackdown) — uploading either one's output now gets policy defects
+(MC011) on every affected order, not protection from them.
+`packages/adapters/src/trackingProxy/{bluecareExpress,aquiline}/real.ts` are kept only as reference
+implementations / mock-parity fixtures; **do not set `BLUECARE_EXPRESS_API_KEY` or `AQUILINE_API_KEY`
+expecting them to work in production.**
 
-Both real adapters (`packages/adapters/src/trackingProxy/{bluecareExpress,aquiline}/real.ts`) were
-written against each provider's publicly documented API shape without a live account to verify
-against — **TODO(HUMAN)**: confirm the exact request/response shape once you have a real account,
-before relying on this path in production. Until then, `pushTrackingWithProxy` (the single required
-call path — see DECISIONS.md milestone 7) still records every attempt in the `tracking_events` audit
-table, so a shape mismatch fails loudly rather than silently.
+**Two live providers, both with real documented APIs**, confirmed 2026-07. Rather than picking one,
+`apps/worker/src/trackingUploader.ts`'s `attemptAutomatedProxyConversion` **cascades through every
+configured provider** (TrackTaco first, then TrackCaptain) and uses whichever succeeds first — a
+provider with no key configured is skipped silently; a configured provider that fails (no credits, no
+match, network error) logs and falls through to the next one:
+- **TrackTaco** (`https://v2.tracktaco.com`) — two-step: `POST /v2/tns/search` (free, rich filters —
+  carrier/destination/status/date-range) returns candidate `tn_id`s, then `POST /v2/tns/reveal`
+  (1 credit) claims the actual number. `real.ts` fetches a small batch of candidates and automatically
+  moves to the next one if the first comes back `already_revealed` (their docs name this as an
+  expected race, not an error). Tried first — a live hands-on comparison found TrackCaptain's own web
+  dashboard search returned zero results for a plausible destination+date filter combination, while
+  TrackTaco's search worked cleanly.
+- **TrackCaptain** (`https://trackcaptain.com/api/v1`) — one-shot `POST /tracking/match-and-claim`,
+  also 1 credit. Tried second in the cascade.
+
+Set `TRACKING_PROXY_PROVIDER` to pin a single provider instead of cascading (`trackcaptain`,
+`bluecare_express`, or `aquiline` — the latter two only reachable this way, never part of the
+automatic cascade, since they're known dead).
+
+Both live providers match by the buyer's ship-to destination (city/state/zip/country — persisted on
+`orders.ship_to_json` at marketplace-order-ingestion time, see `marketplaceSync.ts`) rather than
+converting a specific original tracking number, and both satisfy the broadened tracking-proxy hard
+rule (spec section 7 — see `packages/core/src/trackingProxy.ts` — now covers every
+unrecognized-carrier supplier, not just Amazon Logistics: AliExpress/Temu's own carriers detect as
+`carrierFinal: null` and need proxying exactly the same way `TBA...` numbers do).
+
+**TODO(HUMAN)**:
+1. Set API keys for whichever provider(s) you want in the cascade (both is fine — that's the point):
+   ```
+   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put TRACKTACO_API_KEY --config ../../wrangler.toml
+   pnpm --filter @fulfillment-tracker/worker exec wrangler secret put TRACKCAPTAIN_API_KEY --config ../../wrangler.toml
+   ```
+2. **Buy credits** — `GET /account` (both providers have one) reports your balance; a fresh account
+   starts at 0, and every successful claim/reveal costs 1 credit. With 0 credits everywhere, every
+   automated attempt fails and falls through to the manual-claim safety net below — nothing breaks, it
+   just doesn't proxy anything until funded.
+
+**Fallback (manual claim)**: if the automated call fails for *any* reason — no credits, no match found
+for that destination, key not yet configured, network error — the fulfillment is recorded pending
+(never pushed to eBay un-proxied) and surfaces at `GET /api/extension/pending-tracking-proxy-conversions`.
+The Chrome extension (`apps/extension/src/content/trackCaptain.ts`) injects a panel on
+trackcaptain.com's own dashboard listing what still needs a number, for manually claiming and pasting
+one in as a backstop — `POST /api/extension/pending-tracking-proxy-conversions/:id/complete`. From
+there it's the same non-API-mode path as section 8 above if the storefront needs it. (This panel is
+TrackCaptain-specific for now; if you standardize on TrackTaco, the same manual fallback pattern would
+need its own content script for tracktaco.com's dashboard — not yet built, since the automated path is
+the primary one either way.)
+
+Local dev/test (`MOCK_MODE=true`) is unaffected: `pushTrackingWithProxy` still uses the existing
+synchronous mock proxy clients there, so nothing in this flow needs real credentials to develop
+against — see `apps/worker/src/trackingUploader.ts`.
+
+## 14b. Product discovery ("Opportunities" page)
+
+Two data sources, two different credential sets:
+
+- **Active-listing search** (`searchActiveListings`) uses the same `EBAY_CLIENT_ID`/`EBAY_CLIENT_SECRET`
+  already set up in section 8 — no new secrets. App-level (client-credentials) token, not any per-user
+  storefront token, since it searches eBay's public catalog generally. Optional override:
+  `EBAY_MARKETPLACE_ID` (defaults to `EBAY_US`).
+- **Confirmed-sold search** (`searchSoldListings`, the one that actually drives the opportunity score
+  and the deep-search loop) uses **Apify**, since eBay's own sold-data API (Marketplace Insights) is
+  gated behind a discretionary business-unit approval this app doesn't have (see DECISIONS.md — small
+  apps are routinely denied even after requesting the scope). **TODO(HUMAN)**: sign up at
+  [apify.com](https://apify.com/) (free tier gives ~$5 credit, roughly 1,400 sold-listing records — test
+  before deciding on any paid usage) and grab an API token from Settings → Integrations:
+  ```
+  pnpm --filter @fulfillment-tracker/worker exec wrangler secret put APIFY_TOKEN --config ../../wrangler.toml
+  ```
+  Optional override: `APIFY_EBAY_SOLD_ACTOR_ID` (defaults to `caffein.dev~ebay-sold-listings`) if you
+  find a better/cheaper equivalent actor later.
+
+**Mock mode requires all three eBay-related secrets to look real** (`EBAY_CLIENT_ID`,
+`EBAY_CLIENT_SECRET`, `APIFY_TOKEN`) — any one missing/placeholder and the whole client falls back to
+mock, since the two search methods depend on different credentials entirely.
+
+**Confirmed live, not every actor works — check before swapping.** Two other seemingly-reasonable
+candidate actors (`automation-lab/ebay-sold-scraper`, `midwest_united/ebay-sold-comps`) both returned
+zero results even for extremely high-volume terms ("nintendo switch console"), one with an explicit
+Akamai bot-challenge in its log — they're either currently blocked or have stale selectors. If you ever
+swap `APIFY_EBAY_SOLD_ACTOR_ID`, test it directly against Apify's API first (a popular, recently-built,
+high-run-count actor is a much better signal of live functionality than its description) before trusting
+it in this app — see DECISIONS.md for exactly how this was diagnosed.
+
+**Known data-quality gap**: the wired-up actor's `sellerUsername` field comes back `null` on every
+result observed — it doesn't reliably expose seller identity, so the `uniqueSellers` competition signal
+in the opportunity score likely undercounts. Price and sales-velocity signals are solid; treat the
+competition dimension with more skepticism until/unless a better actor surfaces this properly.
 
 ## 15. The Edge Agent (Chrome extension)
 

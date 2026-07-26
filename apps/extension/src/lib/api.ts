@@ -33,6 +33,14 @@ export interface PendingTrackingUpload {
   carrier: string | null;
 }
 
+export interface PendingTrackingProxyConversion {
+  fulfillmentId: string;
+  externalOrderId?: string;
+  externalOrderNumber?: string;
+  originalTrackingNumber: string;
+  originalCarrier: string | null;
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const config = await getConfig();
   if (!config.bearerToken) {
@@ -71,4 +79,16 @@ export async function fetchPendingTrackingUploads(): Promise<PendingTrackingUplo
 
 export async function completeTrackingUpload(fulfillmentId: string): Promise<void> {
   await apiFetch(`/extension/pending-tracking-uploads/${fulfillmentId}/complete`, { method: 'POST' });
+}
+
+export async function fetchPendingTrackingProxyConversions(): Promise<PendingTrackingProxyConversion[]> {
+  const data = await apiFetch<{ conversions: PendingTrackingProxyConversion[] }>('/extension/pending-tracking-proxy-conversions');
+  return data.conversions;
+}
+
+export async function completeTrackingProxyConversion(fulfillmentId: string, trackingNumber: string, carrier: string): Promise<void> {
+  await apiFetch(`/extension/pending-tracking-proxy-conversions/${fulfillmentId}/complete`, {
+    method: 'POST',
+    body: JSON.stringify({ trackingNumber, carrier }),
+  });
 }

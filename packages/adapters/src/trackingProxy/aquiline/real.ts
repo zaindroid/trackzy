@@ -6,12 +6,13 @@ function newBucket(): TokenBucket {
 }
 
 /**
- * Aquiline tracking-proxy API — an alternate provider to Bluecare Express
- * (spec 7 names both as acceptable options). Snake_case field naming here is
- * deliberately different from Bluecare Express's camelCase to reflect that
- * these are two independent third-party vendors, not the same API under a
- * different name. TODO(HUMAN): verify against Aquiline's actual API docs
- * once an account exists — see DEPLOY.md.
+ * DEAD PROVIDER — DO NOT WIRE THIS INTO PRODUCTION TRAFFIC. eBay removed
+ * Aquiline from its accepted carrier list (2024–2025, same crackdown as
+ * Bluecare Express); uploading its output now gets policy defects (MC011),
+ * not protection from them. Kept only as a reference implementation /
+ * mock-parity fixture — see DECISIONS.md and DEPLOY.md section 14.
+ * `apps/worker/src/trackingUploader.ts` never calls this class; real
+ * conversion now goes through the manual TrackCaptain-claim queue instead.
  */
 export class RealAquilineClient implements TrackingProxyClient {
   private readonly bucket = newBucket();

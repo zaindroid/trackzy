@@ -17,7 +17,15 @@ export class MockAmazonBusinessClient implements SupplierApiClient {
   private orderCounter = 0;
 
   async searchProduct(query: string): Promise<SupplierProduct[]> {
-    return [{ supplierProductId: `B0MOCK${(hashString(query) % 900000) + 100000}`, title: `${query} (Amazon Business)` }];
+    const id = `B0MOCK${(hashString(query) % 900000) + 100000}`;
+    return [
+      {
+        supplierProductId: id,
+        title: `${query} (Amazon Business)`,
+        imageUrl: `https://picsum.photos/seed/${id}/200/200`,
+        productUrl: `https://www.amazon.com/dp/${id}`,
+      },
+    ];
   }
 
   async getOffer(supplierProductId: string): Promise<SupplierOffer> {

@@ -19,7 +19,8 @@ export interface Env {
   SHOPIFY_WEBHOOK_SECRET?: string;
   SHOPIFY_API_VERSION?: string;
   GEMINI_API_KEY?: string;
-  GEMINI_MODEL?: string;
+  GROQ_API_KEY?: string;
+  GROQ_MODEL?: string;
   SEVENTEENTRACK_API_KEY?: string;
   CLERK_SECRET_KEY?: string;
   CLERK_PUBLISHABLE_KEY?: string;
@@ -31,6 +32,9 @@ export interface Env {
   EBAY_OAUTH_ACCESS_TOKEN?: string;
   EBAY_OAUTH_REFRESH_TOKEN?: string;
   EBAY_API_BASE_URL?: string;
+  EBAY_DELETION_VERIFICATION_TOKEN?: string;
+  EBAY_RUNAME?: string;
+  EBAY_MARKETPLACE_ID?: string;
   AMAZON_LWA_CLIENT_ID?: string;
   AMAZON_LWA_CLIENT_SECRET?: string;
   AMAZON_MARKETPLACE_ID?: string;
@@ -59,6 +63,11 @@ export interface Env {
   GMAIL_API_BASE_URL?: string;
   BLUECARE_EXPRESS_API_KEY?: string;
   AQUILINE_API_KEY?: string;
-  TRACKING_PROXY_PROVIDER?: 'bluecare_express' | 'aquiline';
+  TRACKING_PROXY_PROVIDER?: 'tracktaco' | 'trackcaptain' | 'bluecare_express' | 'aquiline';
+  TRACKTACO_API_KEY?: string;
+  TRACKCAPTAIN_API_KEY?: string;
   GEMINI_EMBEDDING_MODEL?: string;
+
+  // Multi-tenant self-serve connections (see DECISIONS.md)
+  CREDENTIAL_ENCRYPTION_KEY?: string;
 }

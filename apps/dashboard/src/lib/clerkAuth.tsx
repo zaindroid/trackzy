@@ -12,7 +12,24 @@ function ClerkBridge({ children }: { children: ReactNode }) {
       setToken(null);
       return;
     }
-    getToken().then(setToken);
+    // Clerk session tokens are short-lived (60s by default) — caching one
+    // `getToken()` result for the life of the session meant every API call
+    // started 401ing a minute after sign-in, with no visible error anywhere
+    // in the app (see DECISIONS.md). Refreshed well under that lifetime so
+    // whatever's cached in `token` is always usable by the time a request
+    // actually goes out.
+    let cancelled = false;
+    const refresh = () => {
+      getToken().then((t) => {
+        if (!cancelled) setToken(t);
+      });
+    };
+    refresh();
+    const interval = setInterval(refresh, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [isSignedIn, getToken]);
 
   const value = useMemo<AuthContextValue>(

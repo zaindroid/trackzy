@@ -17,6 +17,7 @@
     "./rateLimit": "./src/rateLimit.ts",
     "./orderSource": "./src/orderSource/iface.ts",
     "./ebay": "./src/ebay/index.ts",
+    "./ebayMarketResearch": "./src/ebayMarketResearch/index.ts",
     "./amazon": "./src/amazon/index.ts",
     "./supplierApi": "./src/supplierApi/index.ts",
     "./gmail": "./src/gmail/index.ts",
@@ -28,7 +29,8 @@
   },
   "dependencies": {
     "@clerk/backend": "^1.21.4",
-    "@fulfillment-tracker/core": "workspace:*"
+    "@fulfillment-tracker/core": "workspace:*",
+    "fast-xml-parser": "^5.10.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241205.0",
