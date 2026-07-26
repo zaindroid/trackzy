@@ -8,8 +8,8 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-paper px-4">
       <div className="w-full max-w-sm border border-rule bg-paper-raised p-8 shadow-raised">
         <div className="mb-8 border-b border-dashed border-rule pb-6 text-center">
-          <div className="text-xs font-medium tracking-[0.2em] text-ink-faint">PRODUCT</div>
-          <div className="font-display text-3xl font-semibold uppercase tracking-wide text-ink">Sourcing</div>
+          <div className="text-xs font-medium tracking-[0.2em] text-ink-faint">ZEARCH</div>
+          <div className="font-display text-3xl font-semibold uppercase tracking-wide text-ink">Engine</div>
           <p className="mt-2 text-sm text-ink-muted">Find winning products, list them in one click</p>
         </div>
         <Button variant="primary" onClick={loginAsDevUser} className="w-full">

@@ -12,8 +12,8 @@ const NAV_ITEMS = [
 function Wordmark() {
   return (
     <div className="font-display leading-none">
-      <div className="text-xs font-medium tracking-[0.2em] text-ink-faint">PRODUCT</div>
-      <div className="text-2xl font-semibold uppercase tracking-wide text-ink">Sourcing</div>
+      <div className="text-xs font-medium tracking-[0.2em] text-ink-faint">ZEARCH</div>
+      <div className="text-2xl font-semibold uppercase tracking-wide text-ink">Engine</div>
     </div>
   );
 }
