@@ -11,8 +11,11 @@ export const config = {
   // OAuth, so only the app key/secret are needed (no per-user token).
   ebayClientId: required('EBAY_CLIENT_ID'),
   ebayClientSecret: required('EBAY_CLIENT_SECRET'),
-  ebayApiBase: process.env.EBAY_API_BASE ?? 'https://api.ebay.com',
-  ebayMarketplaceId: process.env.EBAY_MARKETPLACE_ID ?? 'EBAY_US',
+  // `||` not `??`: GitHub Actions passes UNSET repo variables as an empty string
+  // (not undefined), which `??` wouldn't catch — that left the base URL empty
+  // and broke the OAuth call. `||` falls back on '' too.
+  ebayApiBase: process.env.EBAY_API_BASE || 'https://api.ebay.com',
+  ebayMarketplaceId: process.env.EBAY_MARKETPLACE_ID || 'EBAY_US',
 
   // Where finished results go (the sourcing-portal ingest endpoint).
   ingestUrl: required('RADAR_INGEST_URL'),
