@@ -25,6 +25,14 @@ export const ebayConnections = sqliteTable('ebay_connections', {
   oauthAccessTokenRef: text('oauth_access_token_ref').notNull(),
   oauthRefreshTokenRef: text('oauth_refresh_token_ref').notNull(),
   oauthExpiresAt: integer('oauth_expires_at').notNull(),
+  // The seller's eBay identity, captured at connect. Needed to honor eBay's
+  // Marketplace Account Deletion notification: when eBay tells us a member
+  // closed their account, this is how we find and purge that seller's stored
+  // connection (see webhooks.ebay-deletion.ts). eBay is migrating from
+  // usernames to immutable user IDs (per their API-update notice), and the
+  // deletion payload carries BOTH — so we store both and match on either.
+  ebayUsername: text('ebay_username'),
+  ebayUserId: text('ebay_user_id'),
   createdAt: integer('created_at').notNull(),
 });
 
@@ -47,6 +55,17 @@ export const supplierConnections = sqliteTable(
     providerCheck: check('supplier_connections_provider_check', sql`${t.provider} in ('cj', 'aliexpress')`),
   }),
 );
+
+// Caches the (paid) ScraperAPI eBay demand result per NORMALIZED niche keyword,
+// so repeated/overlapping research runs don't re-spend credits. GLOBAL (not
+// per-user) — niches recur heavily across users, so a shared cache means the
+// marginal ScraperAPI cost per search trends toward zero as usage grows. Rows
+// older than the pipeline's TTL are treated as misses and refreshed.
+export const demandCache = sqliteTable('demand_cache', {
+  normalizedKey: text('normalized_key').primaryKey(),
+  dataJson: text('data_json').notNull(),
+  lastChecked: integer('last_checked').notNull(),
+});
 
 // Feeds the inline shipping/return details on AddFixedPriceItem (avoiding the
 // eBay Business-Policies dependency) plus the margin/markup math. One row per
@@ -132,6 +151,83 @@ export const researchRuns = sqliteTable(
   },
   (t) => ({
     statusCheck: check('research_runs_status_check', sql`${t.status} in ('running', 'done', 'failed')`),
+  }),
+);
+
+// Product Radar — GLOBAL market-research data (not per-user). Written by an
+// external GitHub Actions crawler via the token-authed POST /ingest/radar
+// endpoint (Workers can't run long IP-rotated crawls), and read back by any
+// authenticated user on the /radar tab. The Worker recomputes per-seller margin
+// at read time from the raw signals here + that user's sellerSettings, so this
+// table stays user-agnostic. See DECISIONS.md.
+export const radarProducts = sqliteTable('radar_products', {
+  id: text('id').primaryKey(),
+  niche: text('niche').notNull(),
+  productTitle: text('product_title').notNull(),
+  imageUrl: text('image_url'),
+  // eBay demand/competition signals (from the crawler's sold + active fetch).
+  ebaySoldCount: integer('ebay_sold_count').notNull().default(0),
+  salesPerDay: real('sales_per_day').notNull().default(0),
+  ebayActiveCount: integer('ebay_active_count').notNull().default(0),
+  sellThroughPercent: real('sell_through_percent').notNull().default(0),
+  ebayMedianSoldPriceCents: integer('ebay_median_sold_price_cents').notNull().default(0),
+  // AliExpress supplier cross-check (nullable — a product may be un-sourceable).
+  aliexpressProductId: text('aliexpress_product_id'),
+  aliexpressUrl: text('aliexpress_url'),
+  aliexpressCostCents: integer('aliexpress_cost_cents'),
+  aliexpressRating: real('aliexpress_rating'),
+  aliexpressOrders: integer('aliexpress_orders'),
+  sourceable: integer('sourceable').notNull().default(0),
+  // Crawler-computed economics (default eBay fee) — the read API overrides
+  // margin with the viewing seller's own fee/shipping settings.
+  marginCents: integer('margin_cents').notNull().default(0),
+  marginPercent: real('margin_percent').notNull().default(0),
+  opportunityScore: real('opportunity_score').notNull().default(0),
+  // Supplier cross-check state: 'ok' (checked, result in the aliexpress_* cols),
+  // 'pending' (demand strong but the Apify budget deferred the check — resumes
+  // next crawl), 'none' (not checked / not applicable).
+  supplierCheck: text('supplier_check', { enum: ['ok', 'pending', 'none'] })
+    .notNull()
+    .default('none'),
+  lastUpdated: integer('last_updated').notNull(),
+  createdAt: integer('created_at').notNull(),
+});
+
+// Supplier-lookup cache — keyed on the crawler's NORMALIZED query so equivalent
+// phrasings ("iphone 15 case clear" / "clear case iphone 15") share one entry
+// and are never paid for twice. A row with `matchJson` null but a fresh
+// `lastChecked` means "checked, no supplier found" (so we don't re-query dead
+// products). The crawler reads/writes this via the token-authed
+// /ingest/radar/supplier/* endpoints (Actions can't touch D1 directly).
+export const supplierCache = sqliteTable('supplier_cache', {
+  normalizedKey: text('normalized_key').primaryKey(),
+  matchJson: text('match_json'),
+  sourceable: integer('sourceable').notNull().default(0),
+  lastChecked: integer('last_checked').notNull(),
+});
+
+// Monthly Apify result-consumption counter (the crawler's hard credit ceiling).
+// One row per calendar month (YYYY-MM). Server-authoritative because Actions
+// runners are ephemeral and can't keep a reliable local count.
+export const apifyUsage = sqliteTable('apify_usage', {
+  monthKey: text('month_key').primaryKey(),
+  resultsConsumed: integer('results_consumed').notNull().default(0),
+});
+
+// Observability for each crawl batch the ingest endpoint receives.
+export const radarRuns = sqliteTable(
+  'radar_runs',
+  {
+    id: text('id').primaryKey(),
+    startedAt: integer('started_at').notNull(),
+    finishedAt: integer('finished_at'),
+    itemsWritten: integer('items_written').notNull().default(0),
+    status: text('status', { enum: ['running', 'done', 'failed'] })
+      .notNull()
+      .default('running'),
+  },
+  (t) => ({
+    statusCheck: check('radar_runs_status_check', sql`${t.status} in ('running', 'done', 'failed')`),
   }),
 );
 

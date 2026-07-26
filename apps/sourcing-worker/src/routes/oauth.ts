@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
 import { createDb, ebayConnections } from '@sourcing/db';
+import { createEbayListingClient } from '@fulfillment-tracker/adapters/ebayListing';
 import type { Env } from '../env.js';
 import { now } from '../lib/id.js';
 import { encryptCredential } from '../lib/credentialCrypto.js';
@@ -8,11 +9,22 @@ import { verifyOauthState } from '../lib/oauthState.js';
 
 const app = new Hono<{ Bindings: Env }>();
 
+// On success we bounce the browser back into the SPA (/connections) so the user
+// isn't stranded on a dead "close this tab" page. Same-origin, so their Clerk
+// session is intact when they land. On failure we stay put and show the reason.
 function resultPage(ok: boolean, detail?: string): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><title>eBay ${ok ? 'connected' : 'connection failed'}</title></head>
+  const returnTo = '/connections';
+  const head = ok
+    ? `<meta http-equiv="refresh" content="2;url=${returnTo}">`
+    : '';
+  const body = ok
+    ? `<p>Taking you back to the app…</p><p style="color:#64748b;font-size:.9rem">If nothing happens, <a href="${returnTo}">click here to return</a>.</p>`
+    : `<p>${detail ?? 'Please try connecting again.'}</p><p><a href="${returnTo}">Back to the app</a></p>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>eBay ${ok ? 'connected' : 'connection failed'}</title>${head}</head>
 <body style="font-family:system-ui;padding:2rem;max-width:32rem;margin:auto">
-<h1>${ok ? '✓ eBay connected' : '✗ eBay connection failed'}</h1>
-<p>${ok ? 'You can close this tab and return to the app.' : (detail ?? 'Please try connecting again.')}</p>
+<h1>${ok ? 'eBay connected' : 'eBay connection failed'}</h1>
+${body}
+${ok ? `<script>setTimeout(function(){location.replace(${JSON.stringify(returnTo)})},1500)</script>` : ''}
 </body></html>`;
 }
 
@@ -45,12 +57,22 @@ app.get('/ebay/callback', async (c) => {
   ]);
   const expiresAt = now() + tokenJson.expires_in * 1000;
 
+  // Capture the seller's eBay username now, so an account-deletion
+  // notification later can find and purge their data. Best-effort — a failure
+  // here must not block the connection itself.
+  let ebayUsername: string | null = null;
+  try {
+    ebayUsername = (await createEbayListingClient(c.env).getUserInfo(tokenJson.access_token)).username;
+  } catch (err) {
+    console.error('[oauth/ebay] GetUser failed (non-fatal):', err);
+  }
+
   const db = createDb(c.env.SOURCING_DB);
   const [existing] = await db.select().from(ebayConnections).where(eq(ebayConnections.userId, userId));
   if (existing) {
     await db
       .update(ebayConnections)
-      .set({ oauthAccessTokenRef: encAccess, oauthRefreshTokenRef: encRefresh, oauthExpiresAt: expiresAt })
+      .set({ oauthAccessTokenRef: encAccess, oauthRefreshTokenRef: encRefresh, oauthExpiresAt: expiresAt, ebayUsername })
       .where(eq(ebayConnections.userId, userId));
   } else {
     await db.insert(ebayConnections).values({
@@ -58,6 +80,7 @@ app.get('/ebay/callback', async (c) => {
       oauthAccessTokenRef: encAccess,
       oauthRefreshTokenRef: encRefresh,
       oauthExpiresAt: expiresAt,
+      ebayUsername,
       createdAt: now(),
     });
   }

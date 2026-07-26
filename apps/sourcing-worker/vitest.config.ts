@@ -23,6 +23,8 @@ export default defineWorkersConfig(async () => {
               EBAY_CLIENT_ID: 'PLACEHOLDER__EBAY_CLIENT_ID',
               EBAY_CLIENT_SECRET: 'PLACEHOLDER__EBAY_CLIENT_SECRET',
               EBAY_RUNAME: 'PLACEHOLDER__EBAY_RUNAME',
+              EBAY_DELETION_VERIFICATION_TOKEN: 'test-verification-token-0123456789',
+              RADAR_INGEST_TOKEN: 'test-radar-ingest-token-0123456789',
               GEMINI_API_KEY: 'PLACEHOLDER__GEMINI_API_KEY',
               GROQ_API_KEY: 'PLACEHOLDER__GROQ_API_KEY',
               APIFY_TOKEN: 'PLACEHOLDER__APIFY_TOKEN',

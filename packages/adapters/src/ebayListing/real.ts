@@ -1,6 +1,6 @@
 import { XMLParser } from 'fast-xml-parser';
 import { TokenBucket, fetchWithBackoff } from '../rateLimit.js';
-import type { CategorySuggestion, CreateListingInput, CreateListingResult, EbayListingClient, EbayListingEnv } from './iface.js';
+import type { CategorySuggestion, CreateListingInput, CreateListingResult, EbayListingClient, EbayListingEnv, EbayUserInfo } from './iface.js';
 
 // Same compatibility level trackzy's ebay adapter uses — see that file's note.
 const TRADING_API_COMPATIBILITY_LEVEL = 1193;
@@ -52,14 +52,17 @@ export class RealEbayListingClient implements EbayListingClient {
   }
 
   /**
-   * TODO(HUMAN): the AddFixedPriceItem XML below follows eBay's published
-   * Trading API docs but hasn't been exercised against a live account (it
-   * creates a real, publicly-visible, fee-incurring listing — not something to
-   * fire blindly during an unattended build). Verify against eBay's sandbox
-   * first. Known assumptions to confirm: managed-payments accounts omit
-   * `<PaymentMethods>` entirely (set here — most accounts are managed payments
-   * now); `ShippingService` USPSGround is a valid flat service code;
-   * `ListingDuration` GTC is allowed for fixed-price.
+   * VERIFIED against the eBay sandbox (2026-07-26, created ItemID 110590069907
+   * on testuser_zainey4): the AddFixedPriceItem XML below works. Confirmed:
+   * managed-payments accounts correctly omit `<PaymentMethods>`; `ListingDuration`
+   * GTC is valid for fixed-price; external supplier `PictureURL`s are accepted;
+   * category from the Taxonomy API is accepted. Two things the sandbox corrected:
+   * `USPSGround` is NOT a valid service code (error 12519) — default is now
+   * `USPSPriority` (overridable via `input.shippingServiceCode`); and
+   * `<ShippingServiceAdditionalCost>` must be set explicitly to avoid warning
+   * 219026. Note: eBay enforces a duplicate-listing policy per seller (error
+   * 21919067) — identical title+details from the same seller is rejected; use a
+   * multi-quantity listing for genuine restocks.
    */
   async createFixedPriceListing(input: CreateListingInput): Promise<CreateListingResult> {
     const conditionId = CONDITION_IDS[input.condition] ?? 1000;
@@ -94,7 +97,7 @@ export class RealEbayListingClient implements EbayListingClient {
       aspects ? `<ItemSpecifics>${aspects}</ItemSpecifics>` : '',
       '<ShippingDetails><ShippingType>Flat</ShippingType>',
       '<ShippingServiceOptions><ShippingServicePriority>1</ShippingServicePriority>',
-      `<ShippingService>USPSGround</ShippingService><ShippingServiceCost currencyID="USD">${shipCost}</ShippingServiceCost>`,
+      `<ShippingService>${escapeXml(input.shippingServiceCode ?? 'USPSPriority')}</ShippingService><ShippingServiceCost currencyID="USD">${shipCost}</ShippingServiceCost><ShippingServiceAdditionalCost currencyID="USD">${shipCost}</ShippingServiceAdditionalCost>`,
       '</ShippingServiceOptions></ShippingDetails>',
       `<DispatchTimeMax>${input.handlingTimeDays}</DispatchTimeMax>`,
       returnPolicyXml,
@@ -108,6 +111,14 @@ export class RealEbayListingClient implements EbayListingClient {
       throw new Error('eBay AddFixedPriceItem succeeded (Ack != Failure) but returned no ItemID');
     }
     return { ebayItemId: response.ItemID };
+  }
+
+  async getUserInfo(accessToken: string): Promise<EbayUserInfo> {
+    // GetUser with no ItemID returns the *authenticated* user (the seller who
+    // granted the token). `User.UserID` is the eBay username. Works with the
+    // same IAF token / sell.inventory scope — no extra identity scope needed.
+    const response = await this.tradingApiRequest<{ User?: { UserID?: string } }>(accessToken, 'GetUser', '');
+    return { username: response.User?.UserID ?? null };
   }
 
   private async tradingApiRequest<T>(accessToken: string, callName: string, bodyXml: string): Promise<T> {

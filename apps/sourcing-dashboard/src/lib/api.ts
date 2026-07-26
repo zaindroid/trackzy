@@ -40,6 +40,29 @@ export interface ProductCandidate {
   createdAt: number;
 }
 
+export interface RadarProduct {
+  id: string;
+  niche: string;
+  productTitle: string;
+  imageUrl: string | null;
+  ebaySoldCount: number;
+  salesPerDay: number;
+  ebayActiveCount: number;
+  sellThroughPercent: number;
+  ebayMedianSoldPriceCents: number;
+  aliexpressProductId: string | null;
+  aliexpressUrl: string | null;
+  aliexpressCostCents: number | null;
+  aliexpressRating: number | null;
+  aliexpressOrders: number | null;
+  sourceable: boolean;
+  supplierCheck: 'ok' | 'pending' | 'none';
+  marginCents: number;
+  marginPercent: number;
+  opportunityScore: number;
+  lastUpdated: number;
+}
+
 export class ApiError extends Error {
   constructor(
     public code: string,
@@ -50,12 +73,21 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiFetch<T>(path: string, token: string | null, init?: RequestInit): Promise<T> {
+/**
+ * A bearer token, or (preferred) an async getter that returns a *fresh* one.
+ * Clerk session tokens live ~60s, so passing the getter lets every request mint
+ * a current token at call time instead of reusing a cached (possibly expired)
+ * one — which otherwise surfaces as "Missing or invalid session".
+ */
+export type TokenSource = string | null | (() => Promise<string | null>);
+
+export async function apiFetch<T>(path: string, token: TokenSource, init?: RequestInit): Promise<T> {
+  const bearer = typeof token === 'function' ? await token() : token;
   const res = await fetch(`/api${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
       ...(init?.headers ?? {}),
     },
   });

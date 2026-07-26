@@ -1,5 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { computeListingMargin, computeOpportunityScore } from './productOpportunity.js';
+import { computeListingMargin, computeOpportunityScore, computeSourcingScore } from './productOpportunity.js';
+
+describe('computeSourcingScore', () => {
+  it('scores a strong product (high demand + fat margin + good price) near 100', () => {
+    expect(computeSourcingScore({ totalSold: 240, marginPercent: 80, medianPriceCents: 1500 })).toBeGreaterThanOrEqual(90);
+  });
+
+  it('keeps a decent product above the 70 gate', () => {
+    // ~20 sold, 60% margin, $20 → should clear 70.
+    expect(computeSourcingScore({ totalSold: 20, marginPercent: 60, medianPriceCents: 2000 })).toBeGreaterThanOrEqual(70);
+  });
+
+  it('drops a thin-margin low-demand product below the gate', () => {
+    expect(computeSourcingScore({ totalSold: 5, marginPercent: 25, medianPriceCents: 900 })).toBeLessThan(70);
+  });
+
+  it('never exceeds 100 and treats negative margin as zero', () => {
+    expect(computeSourcingScore({ totalSold: 100000, marginPercent: 300, medianPriceCents: 2000 })).toBe(100);
+    expect(computeSourcingScore({ totalSold: 0, marginPercent: -50, medianPriceCents: 0 })).toBeGreaterThanOrEqual(0);
+  });
+});
 
 describe('computeOpportunityScore', () => {
   it('matches the original tool\'s reference formula for a known input', () => {

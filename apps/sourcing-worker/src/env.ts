@@ -19,6 +19,16 @@ export interface Env {
   APIFY_EBAY_SOLD_ACTOR_ID?: string;
   APIFY_ALIEXPRESS_ACTOR_ID?: string;
 
+  // Free-stack research sources (replace Apify in the Research pipeline):
+  // ScraperAPI for eBay demand (items_sold), AliExpress Dropshipper API for
+  // supplier cost/match. AliExpress uses the PLATFORM token for discovery
+  // (access minted from the refresh token); per-user connect is for fulfillment.
+  SCRAPER_API_KEY?: string;
+  ALIEXPRESS_APP_KEY?: string;
+  ALIEXPRESS_APP_SECRET?: string;
+  ALIEXPRESS_REFRESH_TOKEN?: string;
+  ALIEXPRESS_ACCESS_TOKEN?: string;
+
   // eBay app credentials — used for OAuth token exchange/refresh, the Browse
   // API (active-listing search), the Taxonomy API (category suggest), and the
   // Trading API (AddFixedPriceItem). These are the PRODUCT's app keyset; each
@@ -27,10 +37,22 @@ export interface Env {
   EBAY_CLIENT_SECRET?: string;
   EBAY_RUNAME?: string;
   EBAY_API_BASE_URL?: string;
+  // eBay's OAuth *consent* host (where the seller signs in), separate from the
+  // API base above. Defaults to production `https://auth.ebay.com`; set to
+  // `https://auth.sandbox.ebay.com` to run the connect flow against sandbox.
+  EBAY_AUTH_BASE_URL?: string;
   EBAY_MARKETPLACE_ID?: string;
+  // Shared secret for eBay's Marketplace Account Deletion webhook challenge
+  // (see routes/webhooks.ebay-deletion.ts). Set on the keyset's notification
+  // config in the eBay developer portal and via `wrangler secret put`.
+  EBAY_DELETION_VERIFICATION_TOKEN?: string;
 
   // CJ default base url (per-user token stored in supplier_connections).
   CJ_BASE_URL?: string;
+
+  // Shared bearer secret the external Product Radar crawler (GitHub Actions)
+  // must present to POST results to /ingest/radar. Set via `wrangler secret put`.
+  RADAR_INGEST_TOKEN?: string;
 
   // The trackzy linkage: base URL of the trackzy worker, called best-effort
   // after a listing publishes so trackzy can fulfill it with a deterministic

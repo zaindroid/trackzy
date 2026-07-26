@@ -13,11 +13,17 @@ export class MockApifyAliexpressClient implements ApifyAliexpressClient {
     const count = Math.min(maxProducts, 3 + (base % 5));
     return Array.from({ length: count }, (_, i) => {
       const id = `${base}${i}`;
+      const imageUrls = [
+        `https://picsum.photos/seed/AE${id}a/600/600`,
+        `https://picsum.photos/seed/AE${id}b/600/600`,
+        `https://picsum.photos/seed/AE${id}c/600/600`,
+      ];
       return {
         productId: `AE${id}`,
         title: `${keyword} (AliExpress) - variant ${i + 1}`,
         priceCents: 200 + ((base + i * 53) % 1800),
-        imageUrl: `https://picsum.photos/seed/AE${id}/200/200`,
+        imageUrl: imageUrls[0],
+        imageUrls,
         productUrl: `https://www.aliexpress.com/item/${id}.html`,
         soldCount: (base + i * 7) % 5000,
       };

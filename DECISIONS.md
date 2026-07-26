@@ -2043,10 +2043,18 @@ Trading API `AddFixedPriceItem` for listing creation. See the plan file for the 
   `fast-xml-parser`) in a new stateless `ebayListing` adapter (`createFixedPriceListing` +
   `suggestCategory` via the Taxonomy API). Shipping/return/payment go INLINE on `AddFixedPriceItem`
   (not eBay Business Policies), so a seller needs no extra eBay-side setup. Supplier images pass through
-  as external `PictureURL`s (eBay copies them to its own image server). TODO(HUMAN): the exact
-  `AddFixedPriceItem` XML is unverified against a live account (it creates a real, fee-incurring
-  listing — not something to fire during an unattended build); verify against eBay's sandbox first, and
-  confirm managed-payments accounts omit `<PaymentMethods>` as assumed.
+  as external `PictureURL`s (eBay copies them to its own image server). **VERIFIED against the eBay
+  sandbox** (2026-07-26 — created a real sandbox listing, ItemID 110590069907, on `testuser_zainey4`
+  via the sandbox "Fullfilment" keyset `ZainUlHa-Fullfilm-SBX-...`). Confirmed working: managed-payments
+  accounts correctly omit `<PaymentMethods>`; `ListingDuration` GTC valid for fixed-price; external
+  supplier `PictureURL`s accepted; Taxonomy-suggested category accepted; OAuth IAF token + `sell.inventory`
+  scope sufficient. Two corrections the sandbox forced: `USPSGround` is NOT a valid shipping service
+  (error 12519) → default is now `USPSPriority`, overridable via `CreateListingInput.shippingServiceCode`;
+  and `<ShippingServiceAdditionalCost>` must be set explicitly (else warning 219026). Also noted: eBay
+  enforces a per-seller duplicate-listing policy (error 21919067) — identical title+details from the same
+  seller is rejected, so genuine restocks must be multi-quantity listings, not repeat AddFixedPriceItem
+  calls. The verification used a throwaway guarded live test (since removed) driven by a sandbox OAuth
+  user token; the live path exercised is `RealEbayListingClient.{getUserInfo,suggestCategory,createFixedPriceListing}`.
 - **eBay token lifecycle** lives in the sourcing worker (`lib/ebayConnection.ts` — decrypt, refresh
   within 5 min of expiry, persist), so the `ebayListing` adapter stays a stateless "give me a token"
   client. Credentials encrypted with the identical AES-256-GCM `enc:v1:` scheme as trackzy.
@@ -2061,3 +2069,84 @@ Trading API `AddFixedPriceItem` for listing creation. See the plan file for the 
   set the sourcing Worker's secrets (Clerk, encryption key, Groq/Gemini, Apify, eBay app keys, its own
   `EBAY_RUNAME` redirect, and `TRACKZY_BASE_URL` for the linkage); pick a real product name (dirs use
   `sourcing-*` placeholders).
+- **Zearch has its OWN eBay account-deletion webhook** (not the exemption). The user correctly flagged
+  that Zearch genuinely processes eBay member data — it stores the seller's OAuth token and acts on
+  their store — so the "we don't store eBay data" exemption trackzy could *almost* have claimed does not
+  apply here. So Zearch implements the real endpoint at
+  `apps/sourcing-worker/src/routes/webhooks.ebay-account-deletion` (GET challenge = 
+  `sha256Hex(challengeCode + verificationToken + endpointUrl)`; POST purges the matching
+  `ebay_connections` row, deleting the seller's stored OAuth tokens). To find the right row on deletion,
+  the OAuth callback now captures the seller's eBay identity at connect via a new Trading API `GetUser`
+  call (`ebayListing.getUserInfo`) and stores `ebay_username` + `ebay_user_id` (migration
+  `0001_living_firelord.sql`, applied to prod). The POST matches on EITHER field because eBay is
+  migrating usernames → immutable user IDs and sends both. `EBAY_DELETION_VERIFICATION_TOKEN` is a
+  self-chosen shared secret (set via `wrangler secret put` on the `sourcing-portal` worker); the live
+  endpoint is verified returning the exact challenge hash. **Note**: eBay only *requires* this webhook on
+  a PRODUCTION keyset — a Sandbox keyset (which is what the user created first, to safely test
+  `AddFixedPriceItem`) does not need it. Register the endpoint URL
+  (`https://sourcing-portal.zainey4-26a.workers.dev/webhooks/ebay-account-deletion`) + the verification
+  token on the production keyset's notification settings when going live. Because the two products can't
+  share one OAuth-enabled RuName per keyset (a hard eBay limit — one OAuth RuName per keyset), Zearch
+  needs its OWN keyset; the currently-set `EBAY_CLIENT_ID`/`EBAY_CLIENT_SECRET`/`EBAY_RUNAME` on the
+  worker are trackzy's and must be replaced with Zearch's own once its production keyset exists.
+
+## Product Radar: external crawler → D1 ingest, Worker reads (demand-first sourcing)
+
+The "find products worth listing" engine that the synchronous `/research` flow couldn't be (real
+demand analysis needs long, IP-rotated crawls that a Worker can't run). Split across two repos, decided
+with the user: **crawl outside, read inside.**
+
+- **Separation**: a separate GitHub Actions cron crawler does the eBay sold+active fetch, AliExpress
+  supplier cross-check, and scoring, then POSTs finished results to this Worker. The Worker only stores
+  and renders them. Chosen over running anything crawl-like in the Worker (Workers can't do throttled,
+  proxied, long crawls).
+- **Handoff = token-authed Worker ingest endpoint → D1** (user picked this over a separate Neon
+  Postgres or giving the crawler a Cloudflare account API token). `POST /ingest/radar`, guarded by the
+  `RADAR_INGEST_TOKEN` bearer secret (constant-time compare), mounted OUTSIDE `/api` (no Clerk — a CI
+  job has no user session), mirroring the eBay deletion-webhook pattern. `mode:"replace"` swaps the
+  whole snapshot; `"upsert"` updates by id. Keeps everything in the existing D1 + Drizzle, ~$0, no new
+  service. Full contract for the crawler repo: `docs/RADAR_INGEST_CONTRACT.md`.
+- **Data is GLOBAL, margin is per-seller**: `radar_products` is user-agnostic market data. The crawler
+  stores raw signals (median sold price, supplier cost) + a default-fee margin; `GET /api/radar`
+  RECOMPUTES `marginCents`/`marginPercent` from the viewing seller's own `ebayFeePercent` via
+  `computeListingMargin`, so each seller sees numbers true to their account. Tables: `radar_products`
+  (signals + supplier match + score) and `radar_runs` (crawl observability). Migration
+  `0002_late_boom_boom.sql`, applied to prod.
+- **UI**: new Clerk-protected `Radar` tab (`/radar`) — a ranked, sortable/filterable table (sort by
+  opportunity / margin / sales-per-day / sell-through; min-margin and sourceable-only filters) styled
+  with the existing components. Seeded with 4 sample rows via the live ingest endpoint to verify E2E.
+- **Crawler anti-bot reality (flagged to user)**: GitHub Actions datacenter IPs get CAPTCHA-walled by
+  eBay (Akamai) and AliExpress, so the crawler should use APIs — eBay **Browse API** (active, keyset
+  already has it), AliExpress **Affiliate API** (signed, no CAPTCHA), and a paid/approved source for
+  confirmed-SOLD data (no free official route). This is the only real risk, and it lives entirely in
+  the crawler repo, not here.
+
+## Radar supplier lookup: Apify credit discipline on ONE free account (survivor-only, cached, capped)
+
+The supplier cross-check is the only part of Radar that can cost money — Apify, pay-per-result, a single
+free account (~$5/mo), no rotation. Designed with the user so most nightly crawls cost $0 and the account
+can never be overrun. Apify is the NARROW bottom of the funnel: only ever called for scored *survivors*,
+never the broad keyword universe (enforced in code, not convention).
+
+- **Where the state lives** (user picked this over crawler-local state): the supplier cache + monthly
+  result counter are in the portal's D1, exposed via token-authed `POST /ingest/radar/supplier/{lookup,store}`
+  (same `RADAR_INGEST_TOKEN` guard). The GitHub Actions crawler can't touch D1 directly, and its runners are
+  ephemeral, so a **server-authoritative** counter is actually more reliable than any local file. Tables
+  `supplier_cache` (normalizedKey → match|null + lastChecked) and `apify_usage` (YYYY-MM → resultsConsumed);
+  migration `0003_vengeful_tigra.sql` (applied to prod). Added `supplier_check` ('ok'|'pending'|'none') to
+  `radar_products`.
+- **Six credit layers** (crawler `src/supplier/`, all implemented + tested): (1) survivor-only gate capped
+  at `TOP_N_SURVIVORS`=30; (2) query normalize + dedupe so equivalent phrasings share one paid lookup;
+  (3) D1 cache with `CACHE_TTL_DAYS`=10 slow re-check → steady-state runs make ZERO Apify calls; (4) low
+  `MAX_ITEMS_PER_LOOKUP`=8 (caveat: the AliExpress actor floors ~50 until the Affiliate API replaces it);
+  (5) sync `run-sync-get-dataset-items` + AbortController timeout so a stuck run can't burn credit; (6) a
+  hard monthly ceiling `APIFY_MONTHLY_RESULT_BUDGET`=1000 (below the free credit) — once crossed, survivors
+  are marked `pending` and STILL posted (never dropped, never a hard fail), resuming next month / after a
+  top-up.
+- **Pluggable providers**: `SupplierProvider` interface with `ApifyAliexpressProvider` active and
+  `AffiliateSupplierProvider` a stub — swapping the primary to the cost-free, no-CAPTCHA AliExpress
+  Affiliate API is a one-line change. That's the real fix; Apify is the bootstrap.
+- **UI**: Radar's supplier column shows "supplier check pending" (ochre) for budget-deferred survivors, so
+  strong-demand products surface as "demand strong, supplier not yet checked" rather than vanishing.
+- Contract for the crawler repo updated in `docs/RADAR_INGEST_CONTRACT.md`. Live cache/budget endpoints
+  smoke-tested end-to-end (lookup→miss, store→usage 8, lookup→fresh hit, unauth→401), then test rows purged.

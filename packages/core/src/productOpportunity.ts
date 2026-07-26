@@ -30,6 +30,35 @@ export function computeOpportunityScore(signals: OpportunitySignals): number {
   return Math.round(Math.min(raw, 100) * 10) / 10;
 }
 
+export interface SourcingScoreSignals {
+  /** Proven demand — total items sold across the sampled listings (ScraperAPI items_sold). */
+  totalSold: number;
+  /** The seller's computed margin percentage for this candidate (the money signal). */
+  marginPercent: number;
+  /** Median sold price in cents — for price-band positioning. */
+  medianPriceCents: number;
+}
+
+/**
+ * Sourcing-portal opportunity score (0-100) — distinct from `computeOpportunityScore`
+ * (which trackzy's Opportunities feature shares and which ignores margin). For a
+ * dropshipping *sourcing* decision the two things that actually matter are
+ * PROVEN DEMAND and MARGIN, with price-band as a lighter factor:
+ *   - demand: log-scaled units sold (10→~17, 100→~34, 1000+→40 cap)
+ *   - margin: linear, ~80% margin earns the full 40
+ *   - price:  full marks in the $12-$80 impulse-buy-yet-profitable band
+ * A genuinely strong product (real sales + fat margin + good price) lands ~90-100;
+ * thin-margin or low-demand items fall well below the 70 quality gate the pipeline
+ * applies, so only high-potential candidates surface.
+ */
+export function computeSourcingScore(signals: SourcingScoreSignals): number {
+  const demandScore = Math.min(Math.log10(Math.max(signals.totalSold, 0) + 1) * 17, 40);
+  const marginScore = Math.min(Math.max(signals.marginPercent, 0) * 0.5, 40);
+  const p = signals.medianPriceCents / 100;
+  const priceScore = p >= 12 && p <= 80 ? 20 : p >= 8 && p <= 150 ? 12 : 4;
+  return Math.round(Math.min(100, demandScore + marginScore + priceScore));
+}
+
 export interface ListingMarginInput {
   /** What the seller lists the item at on eBay. */
   sellPriceCents: number;

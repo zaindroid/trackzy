@@ -84,6 +84,12 @@ export interface RefineKeywordsInput {
   sampleTitles: string[];
 }
 
+export interface ExpandNichesInput {
+  seed: string;
+  /** How many distinct sub-niches to generate (the pipeline explores each). */
+  count: number;
+}
+
 export interface OpportunityAnalysisInput {
   keyword: string;
   avgPriceCents: number;
@@ -153,6 +159,8 @@ export interface GeminiExtractor {
   suggestListingTitle(input: GeminiTitleSuggestionInput): Promise<GeminiTitleSuggestionResult>;
   /** Product-discovery "deep search" step: generates more specific sub-keywords when a scan's score is too low to be worth listing. */
   suggestRefinedKeywords(input: RefineKeywordsInput): Promise<string[]>;
+  /** Sourcing "deep search": from one seed, generate many VARIED, specific sub-niches (materials, use-cases, audiences, bundles, adjacent products) to widen the range of candidates explored in a single research run. */
+  expandNiches(input: ExpandNichesInput): Promise<string[]>;
   /** Product-discovery final analysis: a human-readable verdict on the winning keyword from a deep search — never auto-acted on. */
   analyzeOpportunity(input: OpportunityAnalysisInput): Promise<OpportunityAnalysisResult>;
   /** Sourcing portal: generates eBay title/description/aspects for a candidate — a human reviews and one-click publishes. */

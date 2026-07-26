@@ -30,11 +30,14 @@ const CANDIDATE: ProductCandidate = {
 };
 
 describe('ResearchPage', () => {
-  it('renders candidates with a margin breakdown and lists one on click', async () => {
+  it('renders a candidate, then reviews and publishes it (PATCH edits + POST list)', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (init?.method === 'POST' && url.includes('/api/candidates/cand1/list')) {
         return new Response(JSON.stringify({ ebayItemId: 'MOCK-123', sku: 'SRC-cand1' }), { status: 200 });
+      }
+      if (init?.method === 'PATCH' && url.includes('/api/candidates/cand1')) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
       if (url.includes('/api/product-research')) {
         return new Response(JSON.stringify({ candidates: [CANDIDATE] }), { status: 200 });
@@ -49,10 +52,17 @@ describe('ResearchPage', () => {
     expect(screen.getByText('$9.00 profit')).toBeInTheDocument();
     expect(screen.getByText('View supplier product ↗')).toHaveAttribute('href', 'https://cjdropshipping.com/product/CJ1');
 
-    await user.click(screen.getByRole('button', { name: 'List on eBay — one click' }));
+    // Clicking the card button opens the review modal — nothing is published yet.
+    await user.click(screen.getByRole('button', { name: 'Review and list on eBay' }));
+    expect(await screen.findByText('Review before publishing to eBay')).toBeInTheDocument();
+
+    // Confirming saves edits then publishes.
+    await user.click(screen.getByRole('button', { name: 'Confirm & publish to eBay' }));
     await waitFor(() => {
-      const call = fetchMock.mock.calls.find(([u, i]) => String(u).includes('/api/candidates/cand1/list') && (i as RequestInit)?.method === 'POST');
-      expect(call).toBeDefined();
+      const patch = fetchMock.mock.calls.find(([u, i]) => String(u).includes('/api/candidates/cand1') && (i as RequestInit)?.method === 'PATCH');
+      const list = fetchMock.mock.calls.find(([u, i]) => String(u).includes('/api/candidates/cand1/list') && (i as RequestInit)?.method === 'POST');
+      expect(patch).toBeDefined();
+      expect(list).toBeDefined();
     });
 
     vi.unstubAllGlobals();

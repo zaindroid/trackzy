@@ -5,6 +5,7 @@ import { useTheme } from '../lib/theme.js';
 
 const NAV_ITEMS = [
   { to: '/research', label: 'Research' },
+  { to: '/radar', label: 'Radar' },
   { to: '/connections', label: 'Connections' },
   { to: '/settings', label: 'Settings' },
 ];

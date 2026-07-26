@@ -5,13 +5,13 @@ import { apiFetch, type SellerSettings } from '../lib/api.js';
 import { Button, Field, PageHeader, Panel, Select, TextInput } from '../components/ui.js';
 
 export function SettingsPage() {
-  const { token } = useAuthToken();
+  const { getToken } = useAuthToken();
   const queryClient = useQueryClient();
   const [form, setForm] = useState<Partial<SellerSettings>>({});
 
   const query = useQuery({
     queryKey: ['sellerSettings'],
-    queryFn: () => apiFetch<{ settings: SellerSettings }>('/settings', token),
+    queryFn: () => apiFetch<{ settings: SellerSettings }>('/settings', getToken),
   });
 
   useEffect(() => {
@@ -20,7 +20,7 @@ export function SettingsPage() {
 
   const save = useMutation({
     mutationFn: () =>
-      apiFetch('/settings', token, {
+      apiFetch('/settings', getToken, {
         method: 'PUT',
         body: JSON.stringify({
           defaultShippingCostCents: form.defaultShippingCostCents,

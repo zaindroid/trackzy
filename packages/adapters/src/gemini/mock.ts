@@ -15,6 +15,7 @@ import type {
   OpportunityAnalysisInput,
   OpportunityAnalysisResult,
   RefineKeywordsInput,
+  ExpandNichesInput,
 } from './iface.js';
 
 const TITLE_MAX_LENGTH = 80;
@@ -154,6 +155,11 @@ export class MockGeminiExtractor implements GeminiExtractor {
   async suggestRefinedKeywords(input: RefineKeywordsInput): Promise<string[]> {
     const modifiers = ['premium', 'bulk pack', 'travel size', 'for kids', 'waterproof', 'wireless'];
     return modifiers.map((m) => `${input.seedKeyword} ${m}`);
+  }
+
+  async expandNiches(input: ExpandNichesInput): Promise<string[]> {
+    const modifiers = ['silicone', 'stainless steel', 'magnetic', 'foldable', 'rechargeable', 'mini', 'for car', 'for kids', 'waterproof', 'travel', 'set of 3', 'adjustable'];
+    return modifiers.slice(0, Math.max(1, input.count)).map((m) => `${input.seed} ${m}`);
   }
 
   async analyzeOpportunity(input: OpportunityAnalysisInput): Promise<OpportunityAnalysisResult> {

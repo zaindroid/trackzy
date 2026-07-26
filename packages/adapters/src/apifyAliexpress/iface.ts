@@ -9,7 +9,10 @@ export interface AliexpressProduct {
   productId: string;
   title: string;
   priceCents: number;
+  /** Primary image (first of `imageUrls`), kept for backward compatibility. */
   imageUrl?: string;
+  /** All gallery images the actor returned (deduped, https-normalized, ≤12 for eBay). */
+  imageUrls: string[];
   productUrl?: string;
   soldCount?: number;
 }

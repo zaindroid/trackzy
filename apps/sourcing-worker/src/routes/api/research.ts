@@ -34,7 +34,13 @@ app.post('/research', async (c) => {
   try {
     runId = await runResearch(c.env, db, userId, parsed.data.seed, parsed.data.supplier);
   } catch (err) {
-    return errorResponse(c, 'RESEARCH_FAILED', err instanceof Error ? err.message : 'Research failed', 502);
+    const raw = err instanceof Error ? err.message : 'Research failed';
+    // Surface Apify quota exhaustion as a plain-language message rather than the
+    // raw actor error — it's an account/billing condition, not a bug.
+    const message = /usage hard limit|platform-feature-disabled|monthly usage/i.test(raw)
+      ? 'AliExpress sourcing is temporarily unavailable: the Apify scraping quota for this account has been reached. Add credits to the Apify plan, or try again after it resets.'
+      : raw;
+    return errorResponse(c, 'RESEARCH_FAILED', message, 502);
   }
 
   const rows = await db
@@ -53,6 +59,17 @@ app.get('/', async (c) => {
     .where(eq(productCandidates.userId, c.get('userId')))
     .orderBy(desc(productCandidates.createdAt));
   return c.json({ candidates: withParsedJson(rows) });
+});
+
+/** Clears the research feed: dismisses every still-draft candidate for the user
+ * (listed items are kept — they're live on eBay). */
+app.post('/clear', async (c) => {
+  const db = createDb(c.env.SOURCING_DB);
+  await db
+    .update(productCandidates)
+    .set({ status: 'dismissed', updatedAt: Date.now() })
+    .where(and(eq(productCandidates.userId, c.get('userId')), eq(productCandidates.status, 'draft')));
+  return c.json({ ok: true });
 });
 
 app.get('/runs/:id', async (c) => {

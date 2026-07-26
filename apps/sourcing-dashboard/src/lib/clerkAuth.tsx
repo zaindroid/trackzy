@@ -33,8 +33,13 @@ function ClerkBridge({ children }: { children: ReactNode }) {
   }, [isSignedIn, getToken]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ token, loginAsDevUser: () => undefined, logout: () => void signOut() }),
-    [token, signOut],
+    // getToken() calls Clerk directly, so each API request gets a token minted
+    // at call time (Clerk returns a cached one until it's near expiry, then
+    // refreshes) — this is what actually prevents stale-token 401s, rather than
+    // the 30s poll above (which only keeps `token` fresh for display/guards and
+    // is throttled when the tab is backgrounded).
+    () => ({ token, getToken: () => getToken(), loginAsDevUser: () => undefined, logout: () => void signOut() }),
+    [token, getToken, signOut],
   );
 
   if (!isLoaded) return null;

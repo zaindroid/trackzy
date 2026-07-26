@@ -5,7 +5,9 @@ import { decryptCredential, encryptCredential } from './credentialCrypto.js';
 import { now } from './id.js';
 
 const REFRESH_MARGIN_MS = 5 * 60_000;
-const SELL_SCOPE = 'https://api.ebay.com/oauth/api_scope/sell.inventory';
+// Must match the scopes requested at connect (see routes/api/connections.ts):
+// base `api_scope` for Taxonomy + `sell.inventory` for AddFixedPriceItem.
+const SELL_SCOPE = 'https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.inventory';
 
 /**
  * Returns a fresh eBay OAuth access token for the user, transparently

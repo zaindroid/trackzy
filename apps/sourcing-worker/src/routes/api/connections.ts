@@ -11,7 +11,10 @@ import { signOauthState } from '../../lib/oauthState.js';
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVariables }>();
 
-const SELL_SCOPE = 'https://api.ebay.com/oauth/api_scope/sell.inventory';
+// Base `api_scope` is required by the Taxonomy API (category suggestions at
+// list time); `sell.inventory` covers AddFixedPriceItem. Both are requested so
+// the stored token can do the whole one-click-list flow.
+const SELL_SCOPE = 'https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.inventory';
 
 // Returns the eBay consent URL as JSON (not a redirect) — the dashboard
 // navigates to it. Same reasoning as trackzy: an authed endpoint can't be
@@ -21,7 +24,7 @@ app.get('/ebay/start', async (c) => {
     return errorResponse(c, 'NOT_CONFIGURED', 'eBay OAuth is not configured on this deployment yet', 503);
   }
   const state = await signOauthState(c.env, c.get('userId'));
-  const url = new URL('https://auth.ebay.com/oauth2/authorize');
+  const url = new URL(`${c.env.EBAY_AUTH_BASE_URL ?? 'https://auth.ebay.com'}/oauth2/authorize`);
   url.searchParams.set('client_id', c.env.EBAY_CLIENT_ID);
   url.searchParams.set('redirect_uri', c.env.EBAY_RUNAME);
   url.searchParams.set('response_type', 'code');

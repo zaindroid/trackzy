@@ -25,6 +25,12 @@ export interface CreateListingInput {
   handlingTimeDays: number;
   returnPolicy: 'no_returns' | '30_day' | '60_day';
   itemLocationPostalCode: string;
+  /**
+   * eBay flat-rate domestic ShippingService code. Defaults to 'USPSPriority'
+   * (verified valid against the sandbox — 'USPSGround' is NOT a valid code,
+   * eBay error 12519). Override per marketplace if needed.
+   */
+  shippingServiceCode?: string;
 }
 
 export interface CreateListingResult {
@@ -44,8 +50,14 @@ export interface CategorySuggestion {
  * with shipping/return specified INLINE so it works without the seller having
  * set up eBay Business Policies. See the plan / DECISIONS.md.
  */
+export interface EbayUserInfo {
+  username: string | null;
+}
+
 export interface EbayListingClient {
   /** eBay Taxonomy API — suggests the best category id from a listing title, so the user doesn't have to pick one. */
   suggestCategory(accessToken: string, title: string): Promise<CategorySuggestion | null>;
   createFixedPriceListing(input: CreateListingInput): Promise<CreateListingResult>;
+  /** Trading API GetUser — the seller's eBay username, captured at connect to honor account-deletion notifications. */
+  getUserInfo(accessToken: string): Promise<EbayUserInfo>;
 }

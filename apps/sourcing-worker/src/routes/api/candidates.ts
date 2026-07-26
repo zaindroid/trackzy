@@ -73,8 +73,14 @@ app.post('/:id/list', async (c) => {
 
   let categoryId = candidate.categoryId;
   if (!categoryId) {
-    const suggestion = await listing.suggestCategory(accessToken, candidate.generatedTitle);
-    categoryId = suggestion?.categoryId ?? null;
+    try {
+      const suggestion = await listing.suggestCategory(accessToken, candidate.generatedTitle);
+      categoryId = suggestion?.categoryId ?? null;
+    } catch (err) {
+      // Don't let a Taxonomy failure escape as an unhandled 500 (which the UI
+      // can't parse into a message) — surface it as a clean error instead.
+      return errorResponse(c, 'CATEGORY_LOOKUP_FAILED', err instanceof Error ? err.message : 'eBay category lookup failed', 502);
+    }
   }
   if (!categoryId) return errorResponse(c, 'NO_CATEGORY', 'Could not determine an eBay category for this item', 422);
 

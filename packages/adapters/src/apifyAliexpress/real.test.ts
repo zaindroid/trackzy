@@ -23,6 +23,9 @@ describe('RealApifyAliexpressClient', () => {
             title: 'Mulberry Silk Sleeping Mask',
             productUrl: 'https://www.aliexpress.com/item/100500.html',
             imageUrl: 'https://ae.img/1.jpg',
+            // Gallery under one of the probed keys, mixing a protocol-relative
+            // URL and a duplicate of the primary — extraction normalizes + dedupes.
+            images: ['//ae.img/2.jpg', 'https://ae.img/1.jpg', 'https://ae.img/3.jpg'],
             priceCurrent: 'US $1.33',
             soldCount: 4200,
           },
@@ -42,6 +45,7 @@ describe('RealApifyAliexpressClient', () => {
         title: 'Mulberry Silk Sleeping Mask',
         priceCents: 133,
         imageUrl: 'https://ae.img/1.jpg',
+        imageUrls: ['https://ae.img/1.jpg', 'https://ae.img/2.jpg', 'https://ae.img/3.jpg'],
         productUrl: 'https://www.aliexpress.com/item/100500.html',
         soldCount: 4200,
       },

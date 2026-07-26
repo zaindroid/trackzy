@@ -5,24 +5,24 @@ import { apiFetch, type ConnectionStatus } from '../lib/api.js';
 import { Button, PageHeader, Panel, TextInput } from '../components/ui.js';
 
 export function ConnectionsPage() {
-  const { token } = useAuthToken();
+  const { getToken } = useAuthToken();
   const queryClient = useQueryClient();
   const [cjKey, setCjKey] = useState('');
 
   const statusQuery = useQuery({
     queryKey: ['connectionStatus'],
-    queryFn: () => apiFetch<ConnectionStatus>('/connections/status', token),
+    queryFn: () => apiFetch<ConnectionStatus>('/connections/status', getToken),
   });
 
   const startEbay = useMutation({
-    mutationFn: () => apiFetch<{ redirectUrl: string }>('/connections/ebay/start', token),
+    mutationFn: () => apiFetch<{ redirectUrl: string }>('/connections/ebay/start', getToken),
     onSuccess: (data) => {
       window.location.href = data.redirectUrl;
     },
   });
 
   const connectCj = useMutation({
-    mutationFn: () => apiFetch('/connections/cj', token, { method: 'POST', body: JSON.stringify({ apiKey: cjKey }) }),
+    mutationFn: () => apiFetch('/connections/cj', getToken, { method: 'POST', body: JSON.stringify({ apiKey: cjKey }) }),
     onSuccess: () => {
       setCjKey('');
       queryClient.invalidateQueries({ queryKey: ['connectionStatus'] });
@@ -44,7 +44,17 @@ export function ConnectionsPage() {
         <div className="flex items-center justify-between gap-3">
           <p className="text-sm text-ink-muted">Where researched products get published with one click.</p>
           {ebayConnected ? (
-            <span className="rounded-sm bg-moss/15 px-2 py-0.5 text-xs font-medium text-moss">Connected</span>
+            <div className="flex items-center gap-3">
+              <span className="rounded-sm bg-moss/15 px-2 py-0.5 text-xs font-medium text-moss">Connected</span>
+              <button
+                type="button"
+                className="text-xs text-ink-muted underline hover:text-ink disabled:opacity-50"
+                onClick={() => startEbay.mutate()}
+                disabled={startEbay.isPending}
+              >
+                Reconnect
+              </button>
+            </div>
           ) : (
             <Button variant="primary" onClick={() => startEbay.mutate()} disabled={startEbay.isPending}>
               Connect eBay

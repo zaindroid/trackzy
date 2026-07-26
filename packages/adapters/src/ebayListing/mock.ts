@@ -1,4 +1,4 @@
-import type { CategorySuggestion, CreateListingInput, CreateListingResult, EbayListingClient } from './iface.js';
+import type { CategorySuggestion, CreateListingInput, CreateListingResult, EbayListingClient, EbayUserInfo } from './iface.js';
 
 function hashString(value: string): number {
   let h = 0;
@@ -14,5 +14,9 @@ export class MockEbayListingClient implements EbayListingClient {
 
   async createFixedPriceListing(input: CreateListingInput): Promise<CreateListingResult> {
     return { ebayItemId: `MOCK-${hashString(input.sku + input.title)}` };
+  }
+
+  async getUserInfo(_accessToken: string): Promise<EbayUserInfo> {
+    return { username: 'mock_ebay_seller' };
   }
 }

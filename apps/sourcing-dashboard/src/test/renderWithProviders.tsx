@@ -10,6 +10,7 @@ export function renderWithProviders(ui: ReactElement, { route = '/' } = {}) {
   });
   const authValue: AuthContextValue = {
     token: 'dev-user',
+    getToken: async () => 'dev-user',
     loginAsDevUser: () => undefined,
     logout: () => undefined,
   };

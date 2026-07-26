@@ -1,7 +1,7 @@
 import { supplierConnections, type Database } from '@sourcing/db';
 import { and, eq } from 'drizzle-orm';
 import { createCjClient } from '@fulfillment-tracker/adapters/supplierApi';
-import { createApifyAliexpressClient } from '@fulfillment-tracker/adapters/apifyAliexpress';
+import { createAliexpressDsClient } from '@fulfillment-tracker/adapters/aliexpressDs';
 import type { Env } from '../env.js';
 import { decryptCredential } from './credentialCrypto.js';
 
@@ -12,7 +12,11 @@ export interface SourcedProduct {
   title: string;
   costCents: number;
   imageUrl?: string;
+  /** Full supplier image gallery (≤12 for eBay); falls back to `[imageUrl]`. */
+  imageUrls: string[];
   productUrl?: string;
+  /** Supplier's own sales volume (AliExpress `orders`) — a free demand hint used to rank which niches get a paid eBay demand check. */
+  orders?: number;
 }
 
 /**
@@ -30,12 +34,22 @@ export async function searchSupplier(
   keyword: string,
 ): Promise<SourcedProduct[] | null> {
   if (provider === 'aliexpress') {
-    const client = createApifyAliexpressClient(env);
-    const products = await client.searchProducts(keyword);
+    // Official AliExpress Dropshipper API (free, no Apify). Uses the platform's
+    // DS token for discovery; per-user connect is only needed for fulfillment.
+    const client = createAliexpressDsClient(env);
+    const products = await client.searchProducts(keyword, 8);
     return products
-      .filter((p) => p.priceCents > 0)
+      .filter((p) => p.costCents > 0)
       .slice(0, 5)
-      .map((p) => ({ productId: p.productId, title: p.title, costCents: p.priceCents, imageUrl: p.imageUrl, productUrl: p.productUrl }));
+      .map((p) => ({
+        productId: p.productId,
+        title: p.title || keyword,
+        costCents: p.costCents,
+        imageUrl: p.imageUrl,
+        imageUrls: p.imageUrls.length > 0 ? p.imageUrls : p.imageUrl ? [p.imageUrl] : [],
+        productUrl: p.productUrl,
+        orders: p.orders,
+      }));
   }
 
   // CJ — requires the seller's connected key.
@@ -57,6 +71,7 @@ export async function searchSupplier(
       title: product.title,
       costCents: offer.costCents,
       imageUrl: product.imageUrl,
+      imageUrls: product.imageUrl ? [product.imageUrl] : [],
       productUrl: product.productUrl,
     });
   }

@@ -8,6 +8,34 @@
       "when": 1785060405230,
       "tag": "0000_fine_kat_farrell",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1785065541951,
+      "tag": "0001_living_firelord",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785079644584,
+      "tag": "0002_late_boom_boom",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1785084046642,
+      "tag": "0003_vengeful_tigra",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1785109616501,
+      "tag": "0004_glossy_harpoon",
+      "breakpoints": true
     }
   ]
 }

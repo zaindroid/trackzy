@@ -2,6 +2,8 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 
 export interface AuthContextValue {
   token: string | null;
+  /** Returns a *fresh* token at call time — preferred over `token` for API calls. */
+  getToken: () => Promise<string | null>;
   loginAsDevUser: () => void;
   logout: () => void;
 }
@@ -30,6 +32,7 @@ export function MockAuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthContextValue>(
     () => ({
       token,
+      getToken: async () => token,
       loginAsDevUser: () => setToken('dev-user'),
       logout: () => setToken(null),
     }),
