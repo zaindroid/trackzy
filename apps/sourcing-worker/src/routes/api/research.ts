@@ -17,7 +17,7 @@ function withParsedJson(rows: (typeof productCandidates.$inferSelect)[]) {
   }));
 }
 
-const searchSchema = z.object({ seed: z.string().min(1) });
+const searchSchema = z.object({ seed: z.string().min(1), supplier: z.enum(['cj', 'aliexpress']).default('aliexpress') });
 
 /**
  * Runs a research session synchronously (bounded fan-out — see pipeline.ts)
@@ -32,7 +32,7 @@ app.post('/research', async (c) => {
   const userId = c.get('userId');
   let runId: string;
   try {
-    runId = await runResearch(c.env, db, userId, parsed.data.seed);
+    runId = await runResearch(c.env, db, userId, parsed.data.seed, parsed.data.supplier);
   } catch (err) {
     return errorResponse(c, 'RESEARCH_FAILED', err instanceof Error ? err.message : 'Research failed', 502);
   }

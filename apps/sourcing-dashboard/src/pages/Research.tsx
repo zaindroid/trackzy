@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthToken } from '../lib/auth.js';
-import { apiFetch, type ProductCandidate } from '../lib/api.js';
-import { Button, EmptyState, PageHeader, TextInput } from '../components/ui.js';
+import { apiFetch, type ConnectionStatus, type ProductCandidate, type SourcingProvider } from '../lib/api.js';
+import { Button, EmptyState, PageHeader, Select, TextInput } from '../components/ui.js';
 
 function money(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
@@ -100,6 +100,13 @@ export function ResearchPage() {
   const { token } = useAuthToken();
   const queryClient = useQueryClient();
   const [seed, setSeed] = useState('');
+  const [supplier, setSupplier] = useState<SourcingProvider>('aliexpress');
+
+  const statusQuery = useQuery({
+    queryKey: ['connectionStatus'],
+    queryFn: () => apiFetch<ConnectionStatus>('/connections/status', token),
+  });
+  const cjConnected = statusQuery.data?.cjConnected ?? false;
 
   const candidatesQuery = useQuery({
     queryKey: ['candidates'],
@@ -107,7 +114,7 @@ export function ResearchPage() {
   });
 
   const research = useMutation({
-    mutationFn: () => apiFetch<{ candidates: ProductCandidate[] }>('/product-research/research', token, { method: 'POST', body: JSON.stringify({ seed }) }),
+    mutationFn: () => apiFetch<{ candidates: ProductCandidate[] }>('/product-research/research', token, { method: 'POST', body: JSON.stringify({ seed, supplier }) }),
     onSuccess: () => {
       setSeed('');
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
@@ -125,8 +132,14 @@ export function ResearchPage() {
       />
 
       <div className="mb-6 border border-rule bg-paper-raised p-4 shadow-raised">
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <TextInput value={seed} onChange={(e) => setSeed(e.target.value)} placeholder="e.g. silk eye mask" className="sm:w-72" />
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <TextInput value={seed} onChange={(e) => setSeed(e.target.value)} placeholder="e.g. silk eye mask" className="sm:w-64" />
+          <Select value={supplier} onChange={(e) => setSupplier(e.target.value as SourcingProvider)} className="sm:w-44">
+            <option value="aliexpress">AliExpress</option>
+            <option value="cj" disabled={!cjConnected}>
+              CJ Dropshipping{cjConnected ? '' : ' (connect first)'}
+            </option>
+          </Select>
           <Button variant="primary" onClick={() => research.mutate()} disabled={research.isPending || !seed}>
             {research.isPending ? 'Researching…' : 'Research products'}
           </Button>

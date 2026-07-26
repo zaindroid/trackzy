@@ -54,8 +54,15 @@ export function ConnectionsPage() {
         {startEbay.isError && <p className="mt-2 text-sm text-brick">{(startEbay.error as Error).message}</p>}
       </Panel>
 
+      <Panel title="AliExpress" className="mb-4">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm text-ink-muted">Your main supplier — searched automatically, no login needed (public catalog search).</p>
+          <span className="rounded-sm bg-moss/15 px-2 py-0.5 text-xs font-medium text-moss">Ready</span>
+        </div>
+      </Panel>
+
       <Panel title="CJ Dropshipping" className="mb-4">
-        <p className="mb-2 text-sm text-ink-muted">Your supplier — searched for a sourceable match and cost for every product idea.</p>
+        <p className="mb-2 text-sm text-ink-muted">Optional second supplier — connect your API key to also source from CJ per search.</p>
         {cjConnected ? (
           <span className="rounded-sm bg-moss/15 px-2 py-0.5 text-xs font-medium text-moss">Connected</span>
         ) : (

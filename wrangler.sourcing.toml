@@ -17,7 +17,7 @@ run_worker_first = true
 [[d1_databases]]
 binding = "SOURCING_DB"
 database_name = "sourcing-db"
-database_id = "PLACEHOLDER__CREATE_WITH_wrangler_d1_create_sourcing_db"
+database_id = "01b523b9-c41d-45d0-9f0e-13f0a2e2c6d9"
 migrations_dir = "packages/sourcing-db/migrations"
 
 [vars]

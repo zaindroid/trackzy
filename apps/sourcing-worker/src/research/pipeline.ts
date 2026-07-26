@@ -5,7 +5,7 @@ import { createEbayMarketResearchClient } from '@fulfillment-tracker/adapters/eb
 import { createGeminiExtractor } from '@fulfillment-tracker/adapters/gemini';
 import type { Env } from '../env.js';
 import { newId, now } from '../lib/id.js';
-import { createSupplierClientForUser } from '../lib/supplierClient.js';
+import { searchSupplier, type SourcingProvider } from '../lib/sourcingSupplier.js';
 
 // Bounded per the plan: each niche is a real (paid) Apify call + supplier
 // lookups, so v1 caps the fan-out to keep a research request inside a Worker's
@@ -29,7 +29,7 @@ function median(values: number[]): number {
  * (empty sold data, no supplier match, a flaky API) is skipped, never fatal
  * to the whole run.
  */
-export async function runResearch(env: Env, db: Database, userId: string, seed: string): Promise<string> {
+export async function runResearch(env: Env, db: Database, userId: string, seed: string, provider: SourcingProvider): Promise<string> {
   const runId = newId();
   await db.insert(researchRuns).values({ id: runId, userId, seed, status: 'running', createdAt: now() });
 
@@ -37,9 +37,10 @@ export async function runResearch(env: Env, db: Database, userId: string, seed: 
     const [settings] = await db.select().from(sellerSettings).where(eq(sellerSettings.userId, userId));
     const ebayFeePercent = settings?.ebayFeePercent ?? 13.25;
 
-    const supplier = await createSupplierClientForUser(env, db, userId, 'cj');
-    if (!supplier) {
-      throw new Error('No supplier connected — connect CJ Dropshipping before researching.');
+    // Probe the chosen supplier once up front so "CJ not connected" is a clear
+    // error rather than a silently empty result set.
+    if ((await searchSupplier(env, db, userId, provider, seed)) === null) {
+      throw new Error('CJ Dropshipping is not connected — connect it, or use AliExpress (no connection needed).');
     }
 
     const gemini = createGeminiExtractor(env);
@@ -60,17 +61,19 @@ export async function runResearch(env: Env, db: Database, userId: string, seed: 
         const uniqueSellers = new Set(sold.items.map((i) => i.sellerUsername).filter(Boolean)).size;
         const freeShippingPercent = Math.round((sold.items.filter((i) => i.freeShipping).length / sold.items.length) * 1000) / 10;
 
-        const products = await supplier.searchProduct(keyword);
-        const product = products[0];
+        const products = await searchSupplier(env, db, userId, provider, keyword);
+        const product = products?.[0];
         if (!product) continue;
-        const offer = await supplier.getOffer(product.supplierProductId);
 
         const sellPriceCents = medianPriceCents;
         const { marginCents, marginPercent } = computeListingMargin({
           sellPriceCents,
-          supplierCostCents: offer.costCents,
+          supplierCostCents: product.costCents,
           ebayFeePercent,
-          fulfillmentShippingCents: offer.shippingCents,
+          // AliExpress/CJ cost is already landed cost here; fulfillment shipping
+          // is folded into the supplier cost estimate for v1 rather than modeled
+          // separately (dropship items are typically free/cheap-ship from the supplier).
+          fulfillmentShippingCents: 0,
         });
         const opportunityScore = computeOpportunityScore({ avgPriceCents, uniqueSellers, totalSold: sold.items.length, freeShippingPercent });
 
@@ -90,9 +93,9 @@ export async function runResearch(env: Env, db: Database, userId: string, seed: 
           ebayAvgSoldPriceCents: avgPriceCents,
           ebayMedianPriceCents: medianPriceCents,
           ebaySoldCount: sold.items.length,
-          supplierProvider: 'cj',
-          supplierProductId: product.supplierProductId,
-          supplierCostCents: offer.costCents,
+          supplierProvider: provider,
+          supplierProductId: product.productId,
+          supplierCostCents: product.costCents,
           supplierProductUrl: product.productUrl ?? null,
           supplierImageUrlsJson: JSON.stringify(imageUrls),
           marginCents,

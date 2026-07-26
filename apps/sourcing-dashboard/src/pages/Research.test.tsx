@@ -58,9 +58,12 @@ describe('ResearchPage', () => {
     vi.unstubAllGlobals();
   });
 
-  it('runs a research search with the entered seed', async () => {
+  it('runs a research search with the entered seed and default AliExpress supplier', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.includes('/api/connections/status')) {
+        return new Response(JSON.stringify({ ebayConnected: false, cjConnected: false, aliexpressAvailable: true }), { status: 200 });
+      }
       if (init?.method === 'POST' && url.includes('/api/product-research/research')) {
         return new Response(JSON.stringify({ candidates: [] }), { status: 200 });
       }
@@ -82,7 +85,7 @@ describe('ResearchPage', () => {
       expect(call).toBeDefined();
     });
     const [, init] = fetchMock.mock.calls.find(([u]) => String(u).includes('/product-research/research'))!;
-    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ seed: 'phone case' });
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ seed: 'phone case', supplier: 'aliexpress' });
 
     vi.unstubAllGlobals();
   });

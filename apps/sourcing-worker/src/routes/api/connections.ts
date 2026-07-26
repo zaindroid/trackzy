@@ -81,7 +81,9 @@ app.get('/status', async (c) => {
     .select()
     .from(supplierConnections)
     .where(and(eq(supplierConnections.userId, userId), eq(supplierConnections.provider, 'cj')));
-  return c.json({ ebayConnected: Boolean(ebay), cjConnected: Boolean(cj) });
+  // AliExpress needs no connection — it's searched via the app-level Apify
+  // token (public data), so it's always available as a sourcing supplier.
+  return c.json({ ebayConnected: Boolean(ebay), cjConnected: Boolean(cj), aliexpressAvailable: true });
 });
 
 export default app;

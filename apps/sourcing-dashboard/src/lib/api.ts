@@ -1,7 +1,10 @@
 export interface ConnectionStatus {
   ebayConnected: boolean;
   cjConnected: boolean;
+  aliexpressAvailable: boolean;
 }
+
+export type SourcingProvider = 'aliexpress' | 'cj';
 
 export interface SellerSettings {
   userId: string;

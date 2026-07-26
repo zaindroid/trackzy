@@ -19,6 +19,7 @@
     "./ebay": "./src/ebay/index.ts",
     "./ebayMarketResearch": "./src/ebayMarketResearch/index.ts",
     "./ebayListing": "./src/ebayListing/index.ts",
+    "./apifyAliexpress": "./src/apifyAliexpress/index.ts",
     "./amazon": "./src/amazon/index.ts",
     "./supplierApi": "./src/supplierApi/index.ts",
     "./gmail": "./src/gmail/index.ts",

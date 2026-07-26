@@ -17,6 +17,7 @@ export interface Env {
   GEMINI_EMBEDDING_MODEL?: string;
   APIFY_TOKEN?: string;
   APIFY_EBAY_SOLD_ACTOR_ID?: string;
+  APIFY_ALIEXPRESS_ACTOR_ID?: string;
 
   // eBay app credentials — used for OAuth token exchange/refresh, the Browse
   // API (active-listing search), the Taxonomy API (category suggest), and the

@@ -23,7 +23,7 @@ describe('auth', () => {
 describe('connections', () => {
   it('reports both providers disconnected initially, then CJ connected after a successful key exchange', async () => {
     const before = await SELF.fetch('https://s.example.com/api/connections/status', { headers: AUTH });
-    expect(await before.json()).toEqual({ ebayConnected: false, cjConnected: false });
+    expect(await before.json()).toEqual({ ebayConnected: false, cjConnected: false, aliexpressAvailable: true });
 
     // CJ's getAccessToken is a real fetch (not adapter-gated) — stub it.
     vi.stubGlobal(
@@ -39,7 +39,7 @@ describe('connections', () => {
     vi.unstubAllGlobals();
 
     const after = await SELF.fetch('https://s.example.com/api/connections/status', { headers: AUTH });
-    expect(await after.json()).toEqual({ ebayConnected: false, cjConnected: true });
+    expect(await after.json()).toEqual({ ebayConnected: false, cjConnected: true, aliexpressAvailable: true });
   });
 
   it('returns an eBay consent URL carrying an encrypted state', async () => {
@@ -77,46 +77,56 @@ async function connectCj() {
 }
 
 describe('research pipeline (mock adapters)', () => {
-  it('produces ranked, list-ready candidates with real margin math from sold data + supplier cost', async () => {
-    await connectCj();
+  interface Candidate {
+    keyword: string;
+    supplierProvider: string;
+    supplierCostCents: number;
+    suggestedSellPriceCents: number;
+    marginCents: number;
+    generatedTitle: string;
+    supplierImageUrls: string[];
+    status: string;
+  }
 
+  it('defaults to AliExpress (no connection needed) and produces ranked, list-ready candidates with real margin math', async () => {
     const res = await SELF.fetch('https://s.example.com/api/product-research/research', {
       method: 'POST',
       headers: AUTH,
       body: JSON.stringify({ seed: 'silk eye mask' }),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      runId: string;
-      candidates: {
-        keyword: string;
-        supplierCostCents: number;
-        suggestedSellPriceCents: number;
-        marginCents: number;
-        generatedTitle: string;
-        supplierImageUrls: string[];
-        status: string;
-      }[];
-    };
+    const body = (await res.json()) as { runId: string; candidates: Candidate[] };
     expect(body.candidates.length).toBeGreaterThan(0);
     const c0 = body.candidates[0]!;
+    expect(c0.supplierProvider).toBe('aliexpress');
     expect(c0.suggestedSellPriceCents).toBeGreaterThan(0);
     expect(c0.supplierCostCents).toBeGreaterThan(0);
     expect(c0.generatedTitle).toBeTruthy();
     expect(c0.status).toBe('draft');
-    // Ranked by margin descending.
     for (let i = 1; i < body.candidates.length; i++) {
       expect(body.candidates[i - 1]!.marginCents).toBeGreaterThanOrEqual(body.candidates[i]!.marginCents);
     }
   });
 
-  it('refuses to research when no supplier is connected', async () => {
+  it('sources from CJ when explicitly chosen and connected', async () => {
+    await connectCj();
     const res = await SELF.fetch('https://s.example.com/api/product-research/research', {
       method: 'POST',
       headers: AUTH,
-      body: JSON.stringify({ seed: 'phone case' }),
+      body: JSON.stringify({ seed: 'silk eye mask', supplier: 'cj' }),
     });
-    expect(res.status).toBe(502); // RESEARCH_FAILED — surfaces the "connect CJ first" message
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { candidates: Candidate[] };
+    expect(body.candidates[0]?.supplierProvider).toBe('cj');
+  });
+
+  it('refuses a CJ research when CJ is not connected (but AliExpress would still work)', async () => {
+    const res = await SELF.fetch('https://s.example.com/api/product-research/research', {
+      method: 'POST',
+      headers: AUTH,
+      body: JSON.stringify({ seed: 'phone case', supplier: 'cj' }),
+    });
+    expect(res.status).toBe(502);
   });
 });
 
