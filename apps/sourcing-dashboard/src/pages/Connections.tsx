@@ -1,0 +1,73 @@
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAuthToken } from '../lib/auth.js';
+import { apiFetch, type ConnectionStatus } from '../lib/api.js';
+import { Button, PageHeader, Panel, TextInput } from '../components/ui.js';
+
+export function ConnectionsPage() {
+  const { token } = useAuthToken();
+  const queryClient = useQueryClient();
+  const [cjKey, setCjKey] = useState('');
+
+  const statusQuery = useQuery({
+    queryKey: ['connectionStatus'],
+    queryFn: () => apiFetch<ConnectionStatus>('/connections/status', token),
+  });
+
+  const startEbay = useMutation({
+    mutationFn: () => apiFetch<{ redirectUrl: string }>('/connections/ebay/start', token),
+    onSuccess: (data) => {
+      window.location.href = data.redirectUrl;
+    },
+  });
+
+  const connectCj = useMutation({
+    mutationFn: () => apiFetch('/connections/cj', token, { method: 'POST', body: JSON.stringify({ apiKey: cjKey }) }),
+    onSuccess: () => {
+      setCjKey('');
+      queryClient.invalidateQueries({ queryKey: ['connectionStatus'] });
+    },
+  });
+
+  const ebayConnected = statusQuery.data?.ebayConnected ?? false;
+  const cjConnected = statusQuery.data?.cjConnected ?? false;
+
+  return (
+    <div className="max-w-2xl">
+      <PageHeader
+        eyebrow="Setup"
+        title="Connections"
+        description="Connect your eBay store (to publish listings) and your supplier (to source products and compute margin)."
+      />
+
+      <Panel title="eBay" className="mb-4">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm text-ink-muted">Where researched products get published with one click.</p>
+          {ebayConnected ? (
+            <span className="rounded-sm bg-moss/15 px-2 py-0.5 text-xs font-medium text-moss">Connected</span>
+          ) : (
+            <Button variant="primary" onClick={() => startEbay.mutate()} disabled={startEbay.isPending}>
+              Connect eBay
+            </Button>
+          )}
+        </div>
+        {startEbay.isError && <p className="mt-2 text-sm text-brick">{(startEbay.error as Error).message}</p>}
+      </Panel>
+
+      <Panel title="CJ Dropshipping" className="mb-4">
+        <p className="mb-2 text-sm text-ink-muted">Your supplier — searched for a sourceable match and cost for every product idea.</p>
+        {cjConnected ? (
+          <span className="rounded-sm bg-moss/15 px-2 py-0.5 text-xs font-medium text-moss">Connected</span>
+        ) : (
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <TextInput placeholder="Your CJ dashboard API key" value={cjKey} onChange={(e) => setCjKey(e.target.value)} className="sm:w-64" />
+            <Button variant="primary" onClick={() => connectCj.mutate()} disabled={connectCj.isPending || !cjKey}>
+              Connect
+            </Button>
+          </div>
+        )}
+        {connectCj.isError && <p className="mt-2 text-sm text-brick">{(connectCj.error as Error).message}</p>}
+      </Panel>
+    </div>
+  );
+}

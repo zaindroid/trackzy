@@ -10,6 +10,8 @@ import type {
   GeminiListingMatchResult,
   GeminiTitleSuggestionInput,
   GeminiTitleSuggestionResult,
+  ListingContentInput,
+  ListingContentResult,
   OpportunityAnalysisInput,
   OpportunityAnalysisResult,
   RefineKeywordsInput,
@@ -61,6 +63,30 @@ const TITLE_SUGGESTION_SCHEMA = {
     reasoning: { type: 'string' },
   },
   required: ['suggestedTitle', 'reasoning'],
+  additionalProperties: false,
+};
+
+// aspects is an array of {name,value} rather than a free-form object because
+// strict JSON-schema structured output can't express a dynamic-keyed record;
+// converted to a Record<string,string> at the adapter boundary below.
+const LISTING_CONTENT_SCHEMA = {
+  type: 'object',
+  properties: {
+    title: { type: 'string' },
+    descriptionHtml: { type: 'string' },
+    aspects: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { name: { type: 'string' }, value: { type: 'string' } },
+        required: ['name', 'value'],
+        additionalProperties: false,
+      },
+      minItems: 0,
+      maxItems: 12,
+    },
+  },
+  required: ['title', 'descriptionHtml', 'aspects'],
   additionalProperties: false,
 };
 
@@ -343,5 +369,41 @@ export class RealGeminiExtractor implements GeminiExtractor {
       recommendedKeywords: string[];
     }>(prompt, 'opportunity_analysis', OPPORTUNITY_ANALYSIS_SCHEMA);
     return result;
+  }
+
+  /**
+   * Sourcing portal: generates the eBay listing content (title, HTML
+   * description, item specifics) for a product the bot found and margin-
+   * checked. A human reviews/edits and one-click publishes — never
+   * auto-listed straight from this call (see the plan). Pre-listing/authoring
+   * phase, no money-path decision.
+   */
+  async generateListingContent(input: ListingContentInput): Promise<ListingContentResult> {
+    const prompt = [
+      'Write an eBay fixed-price listing for a dropshipped product.',
+      `Buyer search term / niche: ${input.keyword}`,
+      `Supplier product title (source of truth for what the item is): ${input.supplierTitle}`,
+      `Typical eBay sold price for this item: $${(input.avgSoldPriceCents / 100).toFixed(2)}`,
+      'Produce:',
+      '- title: a search-optimized eBay title UNDER 80 characters, front-loaded with the words a buyer',
+      '  would type (product type, key attributes, material/size/color), no ALL-CAPS spam, no emojis.',
+      '- descriptionHtml: a clean HTML body (headings, short paragraphs, a bullet list of features) that',
+      "  reads like a real seller wrote it — accurate to the supplier title, no invented specifics, no",
+      '  false claims (brand, authenticity, warranty) you cannot verify.',
+      '- aspects: eBay item specifics as name/value pairs (e.g. Type, Material, Color, Brand). Use',
+      '  "Generic" or "Unbranded" for Brand unless the supplier title clearly names a real brand.',
+    ].join('\n');
+
+    const result = await this.generate<{
+      title: string;
+      descriptionHtml: string;
+      aspects: { name: string; value: string }[];
+    }>(prompt, 'listing_content', LISTING_CONTENT_SCHEMA);
+
+    const aspects: Record<string, string> = {};
+    for (const { name, value } of result.aspects) {
+      if (name) aspects[name] = value;
+    }
+    return { title: result.title, descriptionHtml: result.descriptionHtml, aspects };
   }
 }

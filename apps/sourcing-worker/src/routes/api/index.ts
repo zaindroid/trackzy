@@ -1,0 +1,17 @@
+import { Hono } from 'hono';
+import type { Env } from '../../env.js';
+import { authMiddleware, type AuthedVariables } from '../../middleware/auth.js';
+import connections from './connections.js';
+import settings from './settings.js';
+import research from './research.js';
+import candidates from './candidates.js';
+
+const app = new Hono<{ Bindings: Env; Variables: AuthedVariables }>();
+
+app.use('*', authMiddleware);
+app.route('/connections', connections);
+app.route('/settings', settings);
+app.route('/product-research', research);
+app.route('/candidates', candidates);
+
+export default app;

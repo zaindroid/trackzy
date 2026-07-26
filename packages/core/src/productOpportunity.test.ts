@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeOpportunityScore } from './productOpportunity.js';
+import { computeListingMargin, computeOpportunityScore } from './productOpportunity.js';
 
 describe('computeOpportunityScore', () => {
   it('matches the original tool\'s reference formula for a known input', () => {
@@ -36,5 +36,35 @@ describe('computeOpportunityScore', () => {
   it('never goes negative even with far more sellers than the competition scale expects', () => {
     const score = computeOpportunityScore({ avgPriceCents: 0, uniqueSellers: 500, totalSold: 0, freeShippingPercent: 0 });
     expect(score).toBe(0);
+  });
+});
+
+describe('computeListingMargin', () => {
+  it('computes profit after supplier cost, eBay fee, and shipping', () => {
+    // Sell $25.00, cost $6.00, 13.25% fee ($3.31 → 331¢), $2.00 shipping.
+    // margin = 2500 - 600 - 331 - 200 = 1369
+    const { marginCents, marginPercent } = computeListingMargin({
+      sellPriceCents: 2500,
+      supplierCostCents: 600,
+      ebayFeePercent: 13.25,
+      fulfillmentShippingCents: 200,
+    });
+    expect(marginCents).toBe(1369);
+    expect(marginPercent).toBe(54.8);
+  });
+
+  it('goes negative when the item cannot be sold profitably at that price', () => {
+    const { marginCents } = computeListingMargin({
+      sellPriceCents: 500,
+      supplierCostCents: 600,
+      ebayFeePercent: 13.25,
+      fulfillmentShippingCents: 200,
+    });
+    expect(marginCents).toBeLessThan(0);
+  });
+
+  it('returns 0% margin for a zero sell price rather than dividing by zero', () => {
+    const { marginPercent } = computeListingMargin({ sellPriceCents: 0, supplierCostCents: 100, ebayFeePercent: 13, fulfillmentShippingCents: 0 });
+    expect(marginPercent).toBe(0);
   });
 });

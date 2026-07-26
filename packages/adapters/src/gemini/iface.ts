@@ -102,6 +102,21 @@ export interface OpportunityAnalysisResult {
   recommendedKeywords: string[];
 }
 
+export interface ListingContentInput {
+  keyword: string;
+  supplierTitle: string;
+  avgSoldPriceCents: number;
+}
+
+export interface ListingContentResult {
+  /** eBay-search-optimized title, kept under eBay's 80-char limit. */
+  title: string;
+  /** HTML description body (safe subset — headings, paragraphs, lists). */
+  descriptionHtml: string;
+  /** Item specifics / eBay aspects, e.g. { Brand: 'Generic', Type: 'Sleep Mask' }. */
+  aspects: Record<string, string>;
+}
+
 /**
  * The seven call sites for the LLM anywhere in this codebase (hard
  * architectural rule — never call Gemini/Groq from the margin/pricing/
@@ -116,12 +131,14 @@ export interface OpportunityAnalysisResult {
  * the user's explicit request/authorization — never touches price/margin/
  * stock, only suggests copy a human reviews before applying), and two more
  * added for product-discovery research (`suggestRefinedKeywords`,
- * `analyzeOpportunity` — see DECISIONS.md): these run entirely in the
- * *pre-listing* research phase, before any product is sourced or listed —
- * there is no order, no margin calculation, no money committed anywhere in
- * this path, so the "never in the margin/money path" rule is about a
- * different phase of the pipeline than these operate in, not an exception
- * to it.
+ * `analyzeOpportunity`), and one for the sourcing portal's listing generation
+ * (`generateListingContent` — title/description/aspects for a product a human
+ * reviews and one-click publishes; see the plan) — see DECISIONS.md: these
+ * all run entirely in the *pre-listing* research/authoring phase, before any
+ * product is sourced or listed — there is no order, no margin calculation, no
+ * money committed anywhere in this path, so the "never in the margin/money
+ * path" rule is about a different phase of the pipeline than these operate in,
+ * not an exception to it.
  */
 export interface GeminiExtractor {
   extractTracking(input: GeminiExtractInput): Promise<GeminiExtractResult>;
@@ -138,4 +155,6 @@ export interface GeminiExtractor {
   suggestRefinedKeywords(input: RefineKeywordsInput): Promise<string[]>;
   /** Product-discovery final analysis: a human-readable verdict on the winning keyword from a deep search — never auto-acted on. */
   analyzeOpportunity(input: OpportunityAnalysisInput): Promise<OpportunityAnalysisResult>;
+  /** Sourcing portal: generates eBay title/description/aspects for a candidate — a human reviews and one-click publishes. */
+  generateListingContent(input: ListingContentInput): Promise<ListingContentResult>;
 }

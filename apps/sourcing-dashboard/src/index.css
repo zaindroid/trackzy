@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-paper: 248 246 241;
+  --color-paper-raised: 255 255 255;
+  --color-ink: 27 31 38;
+  --color-ink-muted: 90 87 78;
+  --color-ink-faint: 150 145 132;
+  --color-rule: 227 221 208;
+  --color-signal: 184 81 30;
+  --color-signal-ink: 255 255 255;
+  --color-freight: 47 93 138;
+  --color-moss: 63 107 74;
+  --color-ochre: 141 108 27;
+  --color-brick: 143 51 42;
+
+  color-scheme: light;
+}
+
+.dark {
+  --color-paper: 19 21 26;
+  --color-paper-raised: 27 30 37;
+  --color-ink: 237 233 224;
+  --color-ink-muted: 162 156 140;
+  --color-ink-faint: 96 91 79;
+  --color-rule: 43 46 54;
+  --color-signal: 224 122 66;
+  --color-signal-ink: 26 17 8;
+  --color-freight: 121 172 217;
+  --color-moss: 128 179 139;
+  --color-ochre: 214 171 84;
+  --color-brick: 222 133 123;
+
+  color-scheme: dark;
+}
+
+@layer base {
+  html {
+    @apply antialiased;
+  }
+  body {
+    @apply bg-paper text-ink;
+    font-feature-settings: 'ss01' 1;
+  }
+  ::selection {
+    @apply bg-signal/25;
+  }
+  :focus-visible {
+    outline: 2px solid rgb(var(--color-signal));
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Responsive manifest table: a real <table> at md+, a stack of
+     label/value cards below md. Keeps table semantics (and every
+     getByRole('table') / getByText query) intact at every breakpoint. */
+  .manifest {
+    @apply w-full border-collapse text-left text-sm;
+  }
+  .manifest thead {
+    @apply hidden md:table-header-group;
+  }
+  .manifest tbody tr {
+    @apply block border-b border-rule px-4 py-3 md:table-row md:border-0 md:px-0 md:py-0;
+  }
+  .manifest tbody tr:last-child {
+    @apply border-b-0;
+  }
+  .manifest tbody td {
+    @apply flex items-center justify-between gap-4 border-0 py-1 text-right md:table-cell md:justify-start md:py-2.5 md:text-left;
+  }
+  .manifest tbody td::before {
+    content: attr(data-label);
+    @apply text-xs font-medium uppercase tracking-wide text-ink-faint md:hidden;
+  }
+}

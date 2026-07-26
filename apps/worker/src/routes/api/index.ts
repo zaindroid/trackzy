@@ -14,6 +14,7 @@ import connections from './connections.js';
 import storefronts from './storefronts.js';
 import pendingSupplierOrders from './pendingSupplierOrders.js';
 import productOpportunities from './productOpportunities.js';
+import external from './external.js';
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVariables }>();
 
@@ -34,5 +35,6 @@ app.route('/connections', connections);
 app.route('/storefronts', storefronts);
 app.route('/pending-supplier-orders', pendingSupplierOrders);
 app.route('/product-opportunities', productOpportunities);
+app.route('/external', external);
 
 export default app;

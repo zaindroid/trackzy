@@ -1,0 +1,18 @@
+name = "sourcing-portal"
+main = "apps/sourcing-worker/src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Test-only config for @cloudflare/vitest-pool-workers. No [assets] binding —
+# tests only exercise /api and /oauth routes, never the static fallback, so
+# there's no dependency on the dashboard being built first.
+
+[[d1_databases]]
+binding = "SOURCING_DB"
+database_name = "sourcing-db"
+database_id = "PLACEHOLDER__D1_DATABASE_ID"
+migrations_dir = "packages/sourcing-db/migrations"
+
+[vars]
+MOCK_MODE = "true"
+ENVIRONMENT = "test"

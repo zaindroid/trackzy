@@ -10,6 +10,8 @@ import type {
   GeminiListingMatchResult,
   GeminiTitleSuggestionInput,
   GeminiTitleSuggestionResult,
+  ListingContentInput,
+  ListingContentResult,
   OpportunityAnalysisInput,
   OpportunityAnalysisResult,
   RefineKeywordsInput,
@@ -166,6 +168,15 @@ export class MockGeminiExtractor implements GeminiExtractor {
       marginEstimateCents: Math.round(input.avgPriceCents * 0.45),
       risk: input.uniqueSellers > 20 ? 'High seller competition may compress margins.' : 'Low competition, but demand is unconfirmed beyond this sample.',
       recommendedKeywords: [`${input.keyword} premium`, `${input.keyword} bundle`],
+    };
+  }
+
+  async generateListingContent(input: ListingContentInput): Promise<ListingContentResult> {
+    const title = `${input.keyword} - ${input.supplierTitle}`.slice(0, 80);
+    return {
+      title,
+      descriptionHtml: `<h2>${input.keyword}</h2><p>${input.supplierTitle}</p><ul><li>Fast shipping</li><li>Quality guaranteed</li></ul>`,
+      aspects: { Brand: 'Unbranded', Type: input.keyword },
     };
   }
 }

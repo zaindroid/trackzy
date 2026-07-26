@@ -2010,3 +2010,54 @@ search (iteratively refining a keyword until it finds a winning niche), not a si
   automation fight for a column with no real customer data in it yet. Left a comment on the field
   documenting the name/meaning mismatch instead — a column named `total_listings` that now holds a
   sold-item count is exactly the kind of thing worth flagging loudly rather than leaving as a silent trap.
+
+## Sister product: the sourcing portal (find winning products → one-click eBay listing)
+
+A second, separately-deployed product built this session — the *pre-sale* half of dropshipping
+(what trackzy's post-sale fulfillment doesn't cover): research a niche → find what's really selling on
+eBay → cross-reference a supplier for cost → compute margin → AI-generate the listing → publish to the
+seller's eBay store with one approval click. User decisions (confirmed): same monorepo but a fully
+separate deploy (own Worker/dashboard/D1), category/seed-driven discovery with AI expansion, and eBay
+Trading API `AddFixedPriceItem` for listing creation. See the plan file for the full design.
+
+- **Why separate at all**: creating LIVE public listings is a materially higher-risk operation than
+  trackzy's read/edit-only eBay usage — isolating it means a bug in the sourcing product can't
+  destabilize the fulfillment pipeline sellers already depend on. "Separate" here is deploy/DB/portal
+  separation, NOT code duplication: `apps/sourcing-worker` + `apps/sourcing-dashboard` +
+  `packages/sourcing-db` are new, but they reuse `packages/adapters` (eBay Trading API via a new
+  `ebayListing` adapter, CJ, Apify eBay sold-data, Groq) and `packages/core` (a new `computeListingMargin`
+  alongside `computeOpportunityScore`) unchanged. The `@sourcing/*` package scope keeps the new product
+  visually distinct in the monorepo.
+- **Shared Clerk, separate data**: both products authenticate against the *same* Clerk app, so a
+  seller's `clerkUserId` is identical in both — same login, but each provisions its own local `users`
+  row in its own DB. This is exactly what makes the linkage below clean without recoupling databases.
+- **The linkage is one new trackzy endpoint**: `POST /api/external/sourced-listing`
+  (`apps/worker/src/routes/api/external.ts`). After the sourcing portal publishes a listing, it calls
+  this best-effort, forwarding the same shared-Clerk bearer token (so trackzy's `authMiddleware`
+  resolves the same seller), and pre-seeds a `listings` + `supplier_offers` row keyed on the eBay ItemID
+  — so trackzy's existing 2-minute `GetMyeBaySelling` sync finds a *deterministic* supplier match instead
+  of re-deriving one. Degrades gracefully: if the seller hasn't also connected eBay + CJ in trackzy, it
+  no-ops (`linked: false`) and trackzy's own matching handles the listing later. This is the ONLY change
+  to trackzy's own code — everything else is the new app.
+- **eBay listing creation** reuses trackzy's exact Trading API pattern (XML + `X-EBAY-API-IAF-TOKEN`,
+  `fast-xml-parser`) in a new stateless `ebayListing` adapter (`createFixedPriceListing` +
+  `suggestCategory` via the Taxonomy API). Shipping/return/payment go INLINE on `AddFixedPriceItem`
+  (not eBay Business Policies), so a seller needs no extra eBay-side setup. Supplier images pass through
+  as external `PictureURL`s (eBay copies them to its own image server). TODO(HUMAN): the exact
+  `AddFixedPriceItem` XML is unverified against a live account (it creates a real, fee-incurring
+  listing — not something to fire during an unattended build); verify against eBay's sandbox first, and
+  confirm managed-payments accounts omit `<PaymentMethods>` as assumed.
+- **eBay token lifecycle** lives in the sourcing worker (`lib/ebayConnection.ts` — decrypt, refresh
+  within 5 min of expiry, persist), so the `ebayListing` adapter stays a stateless "give me a token"
+  client. Credentials encrypted with the identical AES-256-GCM `enc:v1:` scheme as trackzy.
+- **Margin math is deterministic core code**, never the LLM: `computeListingMargin` (sell − supplier
+  cost − eBay fee% − shipping) in `packages/core`. The two new LLM call sites (`suggestRefinedKeywords`
+  reused for niche expansion, and the new `generateListingContent`) run entirely in the pre-listing
+  authoring phase — no money-path decision, consistent with the hard "LLM never touches margin/pricing"
+  rule (the `gemini/iface.ts` docstring now documents all seven call sites and why these don't violate it).
+- **v1 scope**: CJ supplier only (AliExpress deferred — its search is unreliable, see above), bounded
+  synchronous research (3 niches — Cloudflare Queue/Workflow is the phase-2 scale path), no billing.
+  **TODO(HUMAN) before deploy**: `wrangler d1 create sourcing-db` + fill the id in `wrangler.sourcing.toml`;
+  set the sourcing Worker's secrets (Clerk, encryption key, Groq/Gemini, Apify, eBay app keys, its own
+  `EBAY_RUNAME` redirect, and `TRACKZY_BASE_URL` for the linkage); pick a real product name (dirs use
+  `sourcing-*` placeholders).
