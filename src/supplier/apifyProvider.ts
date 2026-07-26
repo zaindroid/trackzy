@@ -31,10 +31,14 @@ export class ApifyAliexpressProvider implements SupplierProvider {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
+      // This actor enforces maxProducts >= 50, so we can't actually request
+      // fewer — `maxItems` only bounds what we KEEP, and resultsConsumed counts
+      // what the actor actually returned (the honest billing unit). The
+      // Affiliate-API provider has no such floor / no per-result cost.
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ searchQueries: [query], maxProducts: maxItems, sortBy: 'orders' }),
+        body: JSON.stringify({ searchQueries: [query], maxProducts: Math.max(maxItems, 50), sortBy: 'orders' }),
         signal: controller.signal,
       });
       if (!res.ok) throw new Error(`Apify actor ${res.status}: ${(await res.text()).slice(0, 200)}`);
