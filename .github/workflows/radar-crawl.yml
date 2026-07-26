@@ -36,4 +36,6 @@ jobs:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           ALIEXPRESS_APP_KEY: ${{ secrets.ALIEXPRESS_APP_KEY }}
           ALIEXPRESS_APP_SECRET: ${{ secrets.ALIEXPRESS_APP_SECRET }}
+          ALIEXPRESS_ACCESS_TOKEN: ${{ secrets.ALIEXPRESS_ACCESS_TOKEN }}
+          ALIEXPRESS_REFRESH_TOKEN: ${{ secrets.ALIEXPRESS_REFRESH_TOKEN }}
           SEEDS: ${{ vars.SEEDS }}
