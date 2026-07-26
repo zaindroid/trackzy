@@ -1,0 +1,31 @@
+name: Radar crawl
+
+on:
+  schedule:
+    # Every day at 04:00 UTC. Adjust as needed.
+    - cron: '0 4 * * *'
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - run: npm run crawl
+        env:
+          EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
+          EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
+          EBAY_API_BASE: ${{ vars.EBAY_API_BASE }}
+          EBAY_MARKETPLACE_ID: ${{ vars.EBAY_MARKETPLACE_ID }}
+          RADAR_INGEST_URL: ${{ secrets.RADAR_INGEST_URL }}
+          RADAR_INGEST_TOKEN: ${{ secrets.RADAR_INGEST_TOKEN }}
+          # Optional — enable real sold-velocity and supplier sourcing.
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          ALIEXPRESS_APP_KEY: ${{ secrets.ALIEXPRESS_APP_KEY }}
+          ALIEXPRESS_APP_SECRET: ${{ secrets.ALIEXPRESS_APP_SECRET }}
+          SEEDS: ${{ vars.SEEDS }}
