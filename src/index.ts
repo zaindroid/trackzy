@@ -2,6 +2,7 @@ import { config, loadSeeds } from './config.js';
 import { generateNiches } from './seeds/llm.js';
 import { fetchEbayActive } from './ebay.js';
 import { fetchEbaySold } from './soldData.js';
+import { fetchEbayDemand } from './ebayScraper.js';
 import { buildRadarItem } from './score.js';
 import { postToRadar } from './ingest.js';
 import { resolveSuppliers } from './supplier/lookup.js';
@@ -34,7 +35,7 @@ async function main() {
   const usingAffiliateForLog = !!(config.aliexpressAppKey && config.aliexpressAppSecret);
   console.log(
     `[radar] niches: ${config.groqApiKey ? 'LLM (Groq)' : 'seeds.json'} · ` +
-      `demand: ${config.useApifySold && config.apifyToken ? 'Apify sold-velocity' : 'eBay Browse (free: competition + price)'} · ` +
+      `demand: ${config.scraperApiKey ? 'ScraperAPI (items_sold)' : config.useApifySold && config.apifyToken ? 'Apify sold-velocity' : 'eBay Browse (competition + price)'} · ` +
       `supplier: ${usingAffiliateForLog ? 'AliExpress Affiliate API (free)' : config.apifyToken ? `Apify (budget ${config.apifyMonthlyResultBudget}/mo)` : 'cache-only, misses→pending'}`,
   );
 
@@ -47,9 +48,13 @@ async function main() {
         console.warn(`[radar] no eBay active listings for "${niche}" — skipping`);
         continue;
       }
-      // Demand: free eBay Browse (competition + price) by default; real
-      // Apify sold-velocity only when explicitly enabled (USE_APIFY_SOLD).
-      const sold = config.useApifySold && config.apifyToken ? await fetchEbaySold(niche) : null;
+      // Demand signal, in preference order:
+      //   1. ScraperAPI structured endpoint (real items_sold — no Apify)
+      //   2. Apify sold-data (only if explicitly enabled)
+      //   3. none (Browse gives competition + price only)
+      let sold = null;
+      if (config.scraperApiKey) sold = await fetchEbayDemand(niche, config.scraperApiKey);
+      else if (config.useApifySold && config.apifyToken) sold = await fetchEbaySold(niche);
       scored.push({ niche, active, sold });
     } catch (err) {
       console.error(`[radar] "${niche}" failed:`, err instanceof Error ? err.message : err);

@@ -41,6 +41,11 @@ export const config = {
   // How many active listings to sample per niche for price/competition.
   sampleLimit: Number(process.env.SAMPLE_LIMIT ?? '50'),
 
+  // ScraperAPI — real eBay demand signal (items_sold/watchers) via the
+  // structured endpoint, no Apify, free-tier friendly. When set, it's the
+  // demand source; otherwise demand falls back to Apify-sold or Browse-only.
+  scraperApiKey: process.env.SCRAPER_API_KEY || undefined,
+
   // ── LLM niche generation (Groq) — the crawler picks its own specific niches ──
   // instead of a hand-maintained seed list. Absent key → falls back to seeds.json.
   groqApiKey: process.env.GROQ_API_KEY || undefined,

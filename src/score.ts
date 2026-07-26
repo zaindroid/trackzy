@@ -16,8 +16,7 @@ export function computeMargin(sellPriceCents: number, supplierCostCents: number)
  * 0–100.
  */
 function opportunityScore(input: {
-  salesPerDay: number;
-  sellThroughPercent: number;
+  soldCount: number;
   medianPriceCents: number;
   activeCount: number;
   sourceable: boolean;
@@ -26,22 +25,21 @@ function opportunityScore(input: {
   const p = input.medianPriceCents / 100;
   // Price sweet spot for eBay dropshipping (cheap enough to impulse-buy, dear
   // enough to profit): full marks $12-$80, partial $6-$150, little otherwise.
-  const priceScore = p >= 12 && p <= 80 ? 25 : p >= 6 && p <= 150 ? 15 : 5;
+  const priceScore = p >= 12 && p <= 80 ? 20 : p >= 6 && p <= 150 ? 12 : 4;
 
-  // Competition sweet spot from the free Browse API: a proven-but-not-saturated
-  // market scores best. Too few active listings = demand unproven; a flood =
-  // saturated/race-to-the-bottom.
+  // Competition sweet spot: a proven-but-not-saturated market scores best. Too
+  // few active listings = demand unproven; a flood = saturated race-to-bottom.
   const a = input.activeCount;
-  const competitionScore = a < 30 ? 8 : a <= 4000 ? 35 : Math.max(0, 35 - (a - 4000) / 500);
+  const competitionScore = a < 30 ? 10 : a <= 4000 ? 25 : Math.max(0, 25 - (a - 4000) / 700);
 
-  // Margin dominates for dropshipping — 66%+ nets the full 40.
-  const marginScore = input.sourceable ? Math.min(Math.max(input.marginPercent, 0) * 0.6, 40) : 0;
+  // Proven demand from ScraperAPI's items_sold (log-scaled: 10 sold→8, 100→16,
+  // 1k→24, capped 25). 0 when no demand source (Browse-only) — score still works.
+  const demandScore = Math.min(Math.log10(Math.max(input.soldCount, 0) + 1) * 8, 25);
 
-  // Real confirmed-demand is only a BONUS now (usually 0, since sold-data via
-  // Apify is off by default) — it can't be the backbone without a free source.
-  const velocityBonus = Math.min(input.salesPerDay * 2, 15) + Math.min(input.sellThroughPercent / 10, 10);
+  // Margin matters for dropshipping — ~66%+ nets the full 30.
+  const marginScore = input.sourceable ? Math.min(Math.max(input.marginPercent, 0) * 0.45, 30) : 0;
 
-  return Math.round(Math.min(100, priceScore + competitionScore + marginScore + velocityBonus));
+  return Math.round(Math.min(100, priceScore + competitionScore + demandScore + marginScore));
 }
 
 /** Combine the per-niche signals into a RadarItem for ingest. */
@@ -85,8 +83,7 @@ export function buildRadarItem(
     marginCents,
     marginPercent,
     opportunityScore: opportunityScore({
-      salesPerDay,
-      sellThroughPercent,
+      soldCount,
       medianPriceCents: medianSoldPriceCents,
       activeCount: active.activeCount,
       sourceable,

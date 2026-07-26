@@ -31,7 +31,9 @@ jobs:
           GROQ_MODEL: ${{ vars.GROQ_MODEL }}
           MAX_NICHES: ${{ vars.MAX_NICHES }}
           SEED_THEMES: ${{ vars.SEED_THEMES }}
-          # Optional — sold-velocity + supplier sourcing.
+          # Real eBay demand signal (free, no Apify).
+          SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
+          # Legacy supplier/sold sourcing.
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           ALIEXPRESS_APP_KEY: ${{ secrets.ALIEXPRESS_APP_KEY }}
           ALIEXPRESS_APP_SECRET: ${{ secrets.ALIEXPRESS_APP_SECRET }}
