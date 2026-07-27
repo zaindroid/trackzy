@@ -141,6 +141,54 @@ export const winners = sqliteTable(
   }),
 );
 
+// Price & stock monitoring for LISTED products — the "keep it profitable" engine
+// (our answer to AutoDS, but true-margin + competitive aware). One row per listed
+// candidate; a scheduled job refreshes supplier cost/stock and smart-reprices.
+export const listingMonitors = sqliteTable('listing_monitors', {
+  candidateId: text('candidate_id')
+    .primaryKey()
+    .references(() => productCandidates.id),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id),
+  enabled: integer('enabled').notNull().default(1),
+  // The seller's protected margin floor and optional hard price ceiling.
+  minMarginPercent: real('min_margin_percent').notNull().default(20),
+  priceCeilingCents: integer('price_ceiling_cents'),
+  // Latest observed state (refreshed each check).
+  stockStatus: text('stock_status', { enum: ['in', 'low', 'out'] }).notNull().default('in'),
+  currentSupplierCostCents: integer('current_supplier_cost_cents'),
+  currentSellPriceCents: integer('current_sell_price_cents'),
+  currentMarginPercent: real('current_margin_percent'),
+  // Rollup for the dashboard: healthy | warning | critical | paused.
+  health: text('health', { enum: ['healthy', 'warning', 'critical', 'paused'] }).notNull().default('healthy'),
+  lastAction: text('last_action'),
+  lastReason: text('last_reason'),
+  lastCheckedAt: integer('last_checked_at'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+// Time series of each monitored listing's supplier cost / sell price / margin,
+// for trend charts and proactive margin-erosion alerts.
+export const listingPriceHistory = sqliteTable(
+  'listing_price_history',
+  {
+    id: text('id').primaryKey(),
+    candidateId: text('candidate_id')
+      .notNull()
+      .references(() => productCandidates.id),
+    supplierCostCents: integer('supplier_cost_cents').notNull(),
+    sellPriceCents: integer('sell_price_cents').notNull(),
+    marginPercent: real('margin_percent').notNull(),
+    stockStatus: text('stock_status').notNull(),
+    capturedAt: integer('captured_at').notNull(),
+  },
+  (t) => ({
+    candidateCapturedIdx: index('listing_price_history_candidate_idx').on(t.candidateId, t.capturedAt),
+  }),
+);
+
 // Daily score snapshots per winner — powers the leaderboard's moving charts
 // (sparklines + ↑/↓ rank/score deltas). At most one row per winner per UTC day.
 export const winnerScoreHistory = sqliteTable(

@@ -34,4 +34,9 @@ app.route('/internal', internalRoutes);
 // Static dashboard (Workers Assets) fallback for everything else.
 app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 
+// No `scheduled` export here: this account is already at Cloudflare's 5-cron
+// limit (trackzy's worker uses all 5). The price/stock monitor sweep instead
+// runs via the token-guarded POST /internal/monitor-sweep, piggybacked on one
+// of trackzy's existing cron ticks — see routes/internal.ts and
+// apps/worker/src/scheduled.ts.
 export default app;

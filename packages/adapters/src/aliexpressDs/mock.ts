@@ -1,4 +1,4 @@
-import type { AliexpressDsClient, AliexpressDsProduct } from './iface.js';
+import type { AliexpressDsClient, AliexpressDsProduct, AliexpressDsProductStatus } from './iface.js';
 
 function hashString(value: string): number {
   let h = 0;
@@ -25,5 +25,14 @@ export class MockAliexpressDsClient implements AliexpressDsClient {
         rating: 4 + ((base + i) % 10) / 10,
       };
     }).sort((a, b) => a.costCents - b.costCents);
+  }
+
+  async getProductStatus(productId: string): Promise<AliexpressDsProductStatus | null> {
+    const base = hashString(productId);
+    return {
+      productId,
+      costCents: 150 + (base % 1500),
+      inStock: base % 7 !== 0, // ~1 in 7 out of stock, to exercise the pause path
+    };
   }
 }

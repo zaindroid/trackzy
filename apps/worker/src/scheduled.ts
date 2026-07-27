@@ -40,6 +40,13 @@ export async function handleScheduled(event: ScheduledController, env: Env): Pro
     await runRepricingSweep(env);
   } else if (event.cron === MARKETPLACE_POLL_CRON) {
     await pollMarketplaceOrders(env);
+    // Piggybacks the Zearch price/stock monitor sweep on this existing cron tick
+    // — the account is already at Cloudflare's 5-cron-trigger limit, so the
+    // sourcing worker has no cron of its own. Best-effort/non-blocking: the
+    // sweep endpoint self-paces (only processes listings actually due), so
+    // being pinged every 10 min is cheap, and any failure here must never
+    // affect trackzy's own order polling above.
+    await triggerSourcingMonitorSweep(env);
   } else if (event.cron === LISTINGS_SYNC_CRON) {
     await syncAllListings(env);
   } else if (event.cron === ALIEXPRESS_KEEPALIVE_CRON) {
@@ -97,4 +104,18 @@ async function refreshOneSupplierIfStale(env: Env, db: Database, supplier: typeo
     },
     ALIEXPRESS_KEEPALIVE_MARGIN_MS,
   );
+}
+
+/** See the comment at the MARKETPLACE_POLL_CRON dispatch above. Dormant unless
+ * both env vars are set; every failure is swallowed. */
+async function triggerSourcingMonitorSweep(env: Env): Promise<void> {
+  if (!env.SOURCING_BASE_URL || !env.INTERNAL_SERVICE_TOKEN) return;
+  try {
+    await fetch(`${env.SOURCING_BASE_URL}/internal/monitor-sweep`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${env.INTERNAL_SERVICE_TOKEN}` },
+    });
+  } catch (err) {
+    console.error('[triggerSourcingMonitorSweep] non-fatal:', err);
+  }
 }

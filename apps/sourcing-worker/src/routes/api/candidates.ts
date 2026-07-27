@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { and, eq } from 'drizzle-orm';
-import { createDb, productCandidates, sellerSettings } from '@sourcing/db';
+import { createDb, listingMonitors, productCandidates, sellerSettings } from '@sourcing/db';
 import { createEbayListingClient } from '@fulfillment-tracker/adapters/ebayListing';
 import type { Env } from '../../env.js';
 import type { AuthedVariables } from '../../middleware/auth.js';
@@ -132,6 +132,22 @@ app.post('/:id/list', async (c) => {
     .update(productCandidates)
     .set({ status: 'listed', ebayItemId, sku, categoryId, updatedAt: now() })
     .where(eq(productCandidates.id, candidate.id));
+
+  // Auto-enable price/stock monitoring for the freshly-listed product.
+  await db
+    .insert(listingMonitors)
+    .values({
+      candidateId: candidate.id,
+      userId,
+      enabled: 1,
+      minMarginPercent: settings?.targetMarginPercent ?? 20,
+      currentSellPriceCents: candidate.suggestedSellPriceCents,
+      currentSupplierCostCents: candidate.supplierCostCents,
+      createdAt: now(),
+      updatedAt: now(),
+    })
+    .onConflictDoNothing()
+    .catch((err) => console.error('[list] monitor enroll failed:', err));
 
   await notifyTrackzy(c.env, c.req.header('Authorization'), {
     ebayItemId,

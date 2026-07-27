@@ -30,7 +30,10 @@ const NAV_SECTIONS: { title: string; items: { to: string; label: string }[] }[] 
   },
   {
     title: 'Sell & fulfill',
-    items: [{ to: '/orders', label: 'Orders' }],
+    items: [
+      { to: '/orders', label: 'Orders' },
+      { to: '/monitors', label: 'Price Monitor' },
+    ],
   },
   {
     title: 'Account',

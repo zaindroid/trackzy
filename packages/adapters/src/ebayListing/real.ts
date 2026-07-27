@@ -121,6 +121,19 @@ export class RealEbayListingClient implements EbayListingClient {
     return { username: response.User?.UserID ?? null };
   }
 
+  async reviseListingPrice(accessToken: string, itemId: string, priceCents: number): Promise<void> {
+    const price = (priceCents / 100).toFixed(2);
+    const bodyXml = `<Item><ItemID>${itemId}</ItemID><StartPrice>${price}</StartPrice></Item>`;
+    await this.tradingApiRequest(accessToken, 'ReviseFixedPriceItem', bodyXml);
+  }
+
+  async setListingQuantity(accessToken: string, itemId: string, quantity: number): Promise<void> {
+    // ReviseInventoryStatus is the lightweight call for price/quantity-only edits;
+    // quantity 0 makes the listing unavailable (our stock-out "pause").
+    const bodyXml = `<InventoryStatus><ItemID>${itemId}</ItemID><Quantity>${Math.max(0, Math.floor(quantity))}</Quantity></InventoryStatus>`;
+    await this.tradingApiRequest(accessToken, 'ReviseInventoryStatus', bodyXml);
+  }
+
   private async tradingApiRequest<T>(accessToken: string, callName: string, bodyXml: string): Promise<T> {
     const requestXml = `<?xml version="1.0" encoding="utf-8"?><${callName}Request xmlns="urn:ebay:apis:eBLBaseComponents">${bodyXml}</${callName}Request>`;
     const res = await fetchWithBackoff(

@@ -1,5 +1,48 @@
 import { describe, expect, it } from 'vitest';
-import { computeListingMargin, computeOpportunityScore, computeSourcingScore } from './productOpportunity.js';
+import { computeListingMargin, computeOpportunityScore, computeSourcingScore, decideReprice } from './productOpportunity.js';
+
+describe('decideReprice (smart auto-repricing brain)', () => {
+  const base = {
+    supplierCostCents: 500,
+    inStock: true,
+    currentSellPriceCents: 1899,
+    competitorMedianCents: 1799,
+    ebayFeePercent: 13.25,
+    fulfillmentShippingCents: 0,
+    minMarginPercent: 20,
+    priceCeilingCents: null as number | null,
+  };
+
+  it('pauses when the supplier is out of stock', () => {
+    expect(decideReprice({ ...base, inStock: false }).action).toBe('pause_oos');
+  });
+
+  it('lowers price to stay competitive but never below the margin floor', () => {
+    const d = decideReprice(base);
+    expect(d.action).toBe('reprice');
+    expect(d.newSellPriceCents).toBe(1799); // follows the competitor median (well above floor)
+    expect(d.marginPercent).toBeGreaterThanOrEqual(20);
+  });
+
+  it('raises price when supplier cost erodes the margin floor', () => {
+    // Cost jumped to $16 → floor must rise well above the $17.99 competitor median.
+    const d = decideReprice({ ...base, supplierCostCents: 1600, competitorMedianCents: 1799 });
+    expect(d.action).toBe('reprice');
+    expect(d.newSellPriceCents).toBeGreaterThan(1799); // margin floor wins over competitiveness
+    expect(d.marginPercent).toBeGreaterThanOrEqual(20 - 0.5);
+  });
+
+  it('pauses as unprofitable when the floor exceeds the ceiling', () => {
+    const d = decideReprice({ ...base, supplierCostCents: 1600, priceCeilingCents: 1999 });
+    expect(d.action).toBe('pause_unprofitable');
+  });
+
+  it('does nothing when the price is already optimal', () => {
+    // Already at the competitive price, healthy margin.
+    const d = decideReprice({ ...base, currentSellPriceCents: 1799 });
+    expect(d.action).toBe('none');
+  });
+});
 
 describe('computeSourcingScore', () => {
   it('scores a strong product (high demand + fat margin + good price) near 100', () => {

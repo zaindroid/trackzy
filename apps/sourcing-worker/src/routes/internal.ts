@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import { createDb, users } from '@sourcing/db';
 import type { Env } from '../env.js';
 import { CREDIT_COSTS, chargeFulfillment } from '../lib/credits.js';
+import { monitorDue } from '../lib/priceMonitor.js';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -39,6 +40,24 @@ app.post('/fulfillment-charge', async (c) => {
 
   const balance = await chargeFulfillment(db, user.id, CREDIT_COSTS.fulfill, parsed.data.orderId);
   return c.json({ ok: true, charged: balance !== null, balance });
+});
+
+/**
+ * Service-to-service endpoint that sweeps DUE monitored listings (re-fetch
+ * supplier cost/stock, smart-reprice, supplier auto-switch on stock-out). No
+ * Cloudflare cron trigger exists for this worker (account is at the 5-cron
+ * limit — see wrangler.sourcing.toml), so trackzy pings this on one of its own
+ * existing cron ticks (apps/worker/src/scheduled.ts). `monitorDue` only
+ * processes listings whose recheck interval has actually elapsed, so being
+ * called every ~10 minutes is cheap and self-pacing — most calls are a no-op.
+ */
+app.post('/monitor-sweep', async (c) => {
+  if (!tokenOk(c.req.header('Authorization'), c.env.INTERNAL_SERVICE_TOKEN)) {
+    return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid service token' } }, 401);
+  }
+  const db = createDb(c.env.SOURCING_DB);
+  const result = await monitorDue(c.env, db);
+  return c.json({ ok: true, ...result });
 });
 
 export default app;

@@ -1,4 +1,4 @@
-import type { AliexpressDsClient, AliexpressDsEnv, AliexpressDsProduct } from './iface.js';
+import type { AliexpressDsClient, AliexpressDsEnv, AliexpressDsProduct, AliexpressDsProductStatus } from './iface.js';
 
 const REST_GATEWAY = 'https://api-sg.aliexpress.com/rest';
 const SYNC_GATEWAY = 'https://api-sg.aliexpress.com/sync';
@@ -150,5 +150,50 @@ export class RealAliexpressDsClient implements AliexpressDsClient {
       })
       .filter((p) => p.costCents > 0)
       .sort((a, b) => a.costCents - b.costCents);
+  }
+
+  async getProductStatus(productId: string): Promise<AliexpressDsProductStatus | null> {
+    const { ALIEXPRESS_APP_KEY, ALIEXPRESS_APP_SECRET } = this.env;
+    if (!ALIEXPRESS_APP_KEY || !ALIEXPRESS_APP_SECRET) throw new Error('AliExpress DS: app key/secret not configured');
+    const accessToken = await this.getAccessToken();
+
+    const params: Record<string, string> = {
+      method: 'aliexpress.ds.product.get',
+      app_key: ALIEXPRESS_APP_KEY,
+      access_token: accessToken,
+      sign_method: 'sha256',
+      timestamp: String(Date.now()),
+      format: 'json',
+      v: '2.0',
+      product_id: productId,
+      ship_to_country: 'US',
+      target_currency: 'USD',
+      target_language: 'en',
+    };
+    params.sign = await this.sign(params, ALIEXPRESS_APP_SECRET);
+
+    const res = await fetch(SYNC_GATEWAY, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(params),
+    });
+    if (!res.ok) throw new Error(`AliExpress DS product.get failed: ${res.status}`);
+    const json = (await res.json()) as { error_response?: unknown; aliexpress_ds_product_get_response?: { result?: any } };
+    if (json.error_response) throw new Error(`AliExpress DS error: ${JSON.stringify(json.error_response).slice(0, 200)}`);
+
+    const result = json.aliexpress_ds_product_get_response?.result;
+    if (!result) return null;
+    // Cheapest SKU price + stock across the product's SKUs.
+    const skus: any[] = result?.ae_item_sku_info_dtos?.ae_item_sku_info_d_t_o ?? [];
+    const prices = skus
+      .map((s) => ({ cents: toCents(s.offer_sale_price ?? s.sku_price), stock: Number(s.sku_available_stock ?? s.ipm_sku_stock ?? 0) }))
+      .filter((s) => s.cents > 0);
+    const cheapest = prices.sort((a, b) => a.cents - b.cents)[0];
+    const totalStock = skus.reduce((sum, s) => sum + Number(s.sku_available_stock ?? s.ipm_sku_stock ?? 0), 0);
+    return {
+      productId,
+      costCents: cheapest?.cents ?? toCents(result?.ae_item_base_info_dto?.sale_price),
+      inStock: totalStock > 0 || (cheapest?.stock ?? 0) > 0,
+    };
   }
 }

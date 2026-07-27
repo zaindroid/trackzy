@@ -7,6 +7,7 @@ import { RadarPage } from './pages/Radar.js';
 import { LibraryPage } from './pages/Library.js';
 import { LeaderboardPage } from './pages/Leaderboard.js';
 import { OrdersPage } from './pages/Orders.js';
+import { MonitorsPage } from './pages/Monitors.js';
 import { ConnectionsPage } from './pages/Connections.js';
 import { SettingsPage } from './pages/Settings.js';
 import { BillingPage } from './pages/Billing.js';
@@ -24,6 +25,7 @@ export default function App() {
         <Route path="/library" element={<LibraryPage />} />
         <Route path="/leaderboard" element={<LeaderboardPage />} />
         <Route path="/orders" element={<OrdersPage />} />
+        <Route path="/monitors" element={<MonitorsPage />} />
         <Route path="/connections" element={<ConnectionsPage />} />
         <Route path="/billing" element={<BillingPage />} />
         <Route path="/settings" element={<SettingsPage />} />

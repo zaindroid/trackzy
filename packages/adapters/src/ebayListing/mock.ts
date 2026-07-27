@@ -19,4 +19,12 @@ export class MockEbayListingClient implements EbayListingClient {
   async getUserInfo(_accessToken: string): Promise<EbayUserInfo> {
     return { username: 'mock_ebay_seller' };
   }
+
+  async reviseListingPrice(_accessToken: string, _itemId: string, _priceCents: number): Promise<void> {
+    // no-op in mock
+  }
+
+  async setListingQuantity(_accessToken: string, _itemId: string, _quantity: number): Promise<void> {
+    // no-op in mock
+  }
 }

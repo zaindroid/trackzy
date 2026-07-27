@@ -60,4 +60,8 @@ export interface EbayListingClient {
   createFixedPriceListing(input: CreateListingInput): Promise<CreateListingResult>;
   /** Trading API GetUser — the seller's eBay username, captured at connect to honor account-deletion notifications. */
   getUserInfo(accessToken: string): Promise<EbayUserInfo>;
+  /** ReviseFixedPriceItem — update a live listing's price (used by the auto-repricer). */
+  reviseListingPrice(accessToken: string, itemId: string, priceCents: number): Promise<void>;
+  /** ReviseInventoryStatus — set a live listing's quantity (0 effectively pauses it on stock-out). */
+  setListingQuantity(accessToken: string, itemId: string, quantity: number): Promise<void>;
 }

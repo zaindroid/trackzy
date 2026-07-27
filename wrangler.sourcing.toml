@@ -23,3 +23,11 @@ migrations_dir = "packages/sourcing-db/migrations"
 [vars]
 MOCK_MODE = "false"
 ENVIRONMENT = "production"
+
+# NOTE: no [triggers] cron here — the Cloudflare account is already at the
+# free-plan limit of 5 cron triggers total (all used by trackzy's worker, see
+# wrangler.toml). The price/stock monitor sweep is instead triggered via a
+# token-guarded internal endpoint (POST /internal/monitor-sweep), piggybacked
+# on one of trackzy's existing cron ticks — see apps/worker/src/scheduled.ts
+# and apps/sourcing-worker/src/routes/internal.ts. monitorDue() self-paces (it
+# only processes listings actually due), so being pinged every ~10 min is fine.

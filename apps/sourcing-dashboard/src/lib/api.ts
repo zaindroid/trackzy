@@ -109,6 +109,25 @@ export interface LeaderboardWinner {
   isNew: boolean;
 }
 
+export interface ListingMonitor {
+  candidateId: string;
+  title: string;
+  imageUrl: string | null;
+  ebayItemId: string | null;
+  enabled: boolean;
+  health: 'healthy' | 'warning' | 'critical' | 'paused';
+  stockStatus: 'in' | 'low' | 'out';
+  minMarginPercent: number;
+  priceCeilingCents: number | null;
+  currentSellPriceCents: number | null;
+  currentSupplierCostCents: number | null;
+  currentMarginPercent: number | null;
+  lastAction: string | null;
+  lastReason: string | null;
+  lastCheckedAt: number | null;
+  marginSpark: number[];
+}
+
 /** A fulfillment order from the trackzy worker (cross-origin, same Clerk token). */
 export interface TrackzyOrder {
   id: string;

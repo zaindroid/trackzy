@@ -40,3 +40,20 @@ describe('POST /internal/fulfillment-charge', () => {
     expect(acct!.balance).toBe(-1); // unchanged by the idempotent retry
   });
 });
+
+describe('POST /internal/monitor-sweep', () => {
+  const SWEEP_URL = 'https://sourcing.example.com/internal/monitor-sweep';
+
+  it('rejects without the service token', async () => {
+    const res = await SELF.fetch(SWEEP_URL, { method: 'POST' });
+    expect(res.status).toBe(401);
+  });
+
+  it('runs the sweep and reports how many listings were checked', async () => {
+    const res = await SELF.fetch(SWEEP_URL, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` } });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; checked: number };
+    expect(body.ok).toBe(true);
+    expect(typeof body.checked).toBe('number'); // 0 when nothing's due yet — still a valid sweep
+  });
+});

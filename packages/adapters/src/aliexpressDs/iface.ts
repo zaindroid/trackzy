@@ -24,6 +24,15 @@ export interface AliexpressDsProduct {
  * (`aliexpress.ds.text.search`). The free, no-Apify, no-CAPTCHA supplier source.
  * Signed with HMAC-SHA256; access token auto-refreshed from the refresh token.
  */
+/** Live cost + stock for a specific product — used by the price/stock monitor. */
+export interface AliexpressDsProductStatus {
+  productId: string;
+  costCents: number;
+  inStock: boolean;
+}
+
 export interface AliexpressDsClient {
   searchProducts(keyword: string, maxProducts?: number): Promise<AliexpressDsProduct[]>;
+  /** Re-fetch a specific product's current cost + stock (aliexpress.ds.product.get). */
+  getProductStatus(productId: string): Promise<AliexpressDsProductStatus | null>;
 }
