@@ -109,6 +109,18 @@ export interface LeaderboardWinner {
   isNew: boolean;
 }
 
+/** A fulfillment order from the trackzy worker (cross-origin, same Clerk token). */
+export interface TrackzyOrder {
+  id: string;
+  externalOrderNumber: string;
+  status: string;
+  currency: string;
+  subtotalCents: number;
+  shippingCents: number;
+  marginCents: number | null;
+  createdAt: number;
+}
+
 export class ApiError extends Error {
   constructor(
     public code: string,
@@ -130,6 +142,30 @@ export type TokenSource = string | null | (() => Promise<string | null>);
 export async function apiFetch<T>(path: string, token: TokenSource, init?: RequestInit): Promise<T> {
   const bearer = typeof token === 'function' ? await token() : token;
   const res = await fetch(`/api${path}`, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
+      ...(init?.headers ?? {}),
+    },
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: { code: string; message: string } } | null;
+    throw new ApiError(body?.error?.code ?? 'UNKNOWN', body?.error?.message ?? res.statusText, res.status);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+// The trackzy (fulfillment) worker's API base — same Clerk token works there
+// (shared Clerk app). Configurable; defaults to the deployed trackzy worker.
+export const TRACKZY_API_BASE = (import.meta.env.VITE_TRACKZY_API_BASE as string | undefined) ?? 'https://fulfillment-tracker.zainey4-26a.workers.dev';
+
+/** Calls the trackzy worker cross-origin (its /api/* has permissive CORS). Used
+ * to surface fulfillment (Orders) inside the unified Zearch dashboard. */
+export async function trackzyFetch<T>(path: string, token: TokenSource, init?: RequestInit): Promise<T> {
+  const bearer = typeof token === 'function' ? await token() : token;
+  const res = await fetch(`${TRACKZY_API_BASE}/api${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',

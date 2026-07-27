@@ -16,14 +16,30 @@ function CreditChip() {
   );
 }
 
-const NAV_ITEMS = [
-  { to: '/research', label: 'Research' },
-  { to: '/radar', label: 'Radar' },
-  { to: '/leaderboard', label: 'Leaderboard' },
-  { to: '/library', label: 'Golden Products' },
-  { to: '/connections', label: 'Connections' },
-  { to: '/billing', label: 'Billing' },
-  { to: '/settings', label: 'Settings' },
+// Unified nav across both engines: discover (Zearch) → sell & fulfill (Zearch +
+// trackzy) → account. One product to the user; two workers underneath.
+const NAV_SECTIONS: { title: string; items: { to: string; label: string }[] }[] = [
+  {
+    title: 'Discover',
+    items: [
+      { to: '/research', label: 'Research' },
+      { to: '/radar', label: 'Radar' },
+      { to: '/leaderboard', label: 'Leaderboard' },
+      { to: '/library', label: 'Golden Products' },
+    ],
+  },
+  {
+    title: 'Sell & fulfill',
+    items: [{ to: '/orders', label: 'Orders' }],
+  },
+  {
+    title: 'Account',
+    items: [
+      { to: '/connections', label: 'Connections' },
+      { to: '/billing', label: 'Billing' },
+      { to: '/settings', label: 'Settings' },
+    ],
+  },
 ];
 
 function Wordmark() {
@@ -37,20 +53,25 @@ function Wordmark() {
 
 function NavList({ onNavigate }: { onNavigate?: () => void }) {
   return (
-    <nav className="flex flex-col gap-0.5">
-      {NAV_ITEMS.map((item) => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          onClick={onNavigate}
-          className={({ isActive }) =>
-            `flex items-center border-l-2 px-3 py-2 text-sm font-medium transition-colors ${
-              isActive ? 'border-signal text-ink' : 'border-transparent text-ink-muted hover:border-rule hover:text-ink'
-            }`
-          }
-        >
-          {item.label}
-        </NavLink>
+    <nav className="flex flex-col gap-4">
+      {NAV_SECTIONS.map((section) => (
+        <div key={section.title} className="flex flex-col gap-0.5">
+          <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.15em] text-ink-faint">{section.title}</div>
+          {section.items.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              onClick={onNavigate}
+              className={({ isActive }) =>
+                `flex items-center border-l-2 px-3 py-2 text-sm font-medium transition-colors ${
+                  isActive ? 'border-signal text-ink' : 'border-transparent text-ink-muted hover:border-rule hover:text-ink'
+                }`
+              }
+            >
+              {item.label}
+            </NavLink>
+          ))}
+        </div>
       ))}
     </nav>
   );
