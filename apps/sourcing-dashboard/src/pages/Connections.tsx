@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthToken } from '../lib/auth.js';
 import { apiFetch, type ConnectionStatus } from '../lib/api.js';
-import { Button, PageHeader, Panel, TextInput } from '../components/ui.js';
+import { Badge, Button, PageHeader, Panel, TextInput } from '../components/ui.js';
 
 export function ConnectionsPage() {
   const { getToken } = useAuthToken();
@@ -45,7 +45,7 @@ export function ConnectionsPage() {
           <p className="text-sm text-ink-muted">Where researched products get published with one click.</p>
           {ebayConnected ? (
             <div className="flex items-center gap-3">
-              <span className="rounded-sm bg-moss/15 px-2 py-0.5 text-xs font-medium text-moss">Connected</span>
+              <Badge tone="moss">Connected</Badge>
               <button
                 type="button"
                 className="text-xs text-ink-muted underline hover:text-ink disabled:opacity-50"
@@ -67,14 +67,14 @@ export function ConnectionsPage() {
       <Panel title="AliExpress" className="mb-4">
         <div className="flex items-center justify-between gap-3">
           <p className="text-sm text-ink-muted">Your main supplier — searched automatically, no login needed (public catalog search).</p>
-          <span className="rounded-sm bg-moss/15 px-2 py-0.5 text-xs font-medium text-moss">Ready</span>
+          <Badge tone="moss">Ready</Badge>
         </div>
       </Panel>
 
       <Panel title="CJ Dropshipping" className="mb-4">
         <p className="mb-2 text-sm text-ink-muted">Optional second supplier — connect your API key to also source from CJ per search.</p>
         {cjConnected ? (
-          <span className="rounded-sm bg-moss/15 px-2 py-0.5 text-xs font-medium text-moss">Connected</span>
+          <Badge tone="moss">Connected</Badge>
         ) : (
           <div className="flex flex-col gap-2 sm:flex-row">
             <TextInput placeholder="Your CJ dashboard API key" value={cjKey} onChange={(e) => setCjKey(e.target.value)} className="sm:w-64" />
