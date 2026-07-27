@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuthToken } from './lib/auth.js';
 import { Layout } from './components/Layout.js';
 import { LoginPage } from './pages/Login.js';
+import { HomePage } from './pages/Home.js';
 import { ResearchPage } from './pages/Research.js';
 import { RadarPage } from './pages/Radar.js';
 import { LibraryPage } from './pages/Library.js';
@@ -19,7 +20,7 @@ export default function App() {
   return (
     <Layout>
       <Routes>
-        <Route path="/" element={<Navigate to="/research" replace />} />
+        <Route path="/" element={<HomePage />} />
         <Route path="/research" element={<ResearchPage />} />
         <Route path="/radar" element={<RadarPage />} />
         <Route path="/library" element={<LibraryPage />} />

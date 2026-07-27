@@ -58,6 +58,7 @@ const NAV_SECTIONS: { title: string; items: { to: string; label: string }[] }[] 
   {
     title: 'Discover',
     items: [
+      { to: '/', label: 'Overview' },
       { to: '/research', label: 'Research' },
       { to: '/radar', label: 'Radar' },
       { to: '/leaderboard', label: 'Leaderboard' },
