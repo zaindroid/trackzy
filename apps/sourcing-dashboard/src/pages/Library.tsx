@@ -2,19 +2,35 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { NavLink } from 'react-router-dom';
 import { useAuthToken } from '../lib/auth.js';
 import { apiFetch, type LibraryResponse, type LibraryWinner } from '../lib/api.js';
-import { Button, EmptyState, PageHeader, Panel } from '../components/ui.js';
+import { Badge, Button, EmptyState, PageHeader, Panel } from '../components/ui.js';
 
 function money(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
 }
 
 function Thumb({ src, blurred, alt }: { src: string | null; blurred: boolean; alt: string }) {
-  if (!src) return <div className="flex h-16 w-16 shrink-0 items-center justify-center border border-rule bg-paper text-[9px] text-ink-faint">Locked</div>;
+  if (!src) return <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border border-rule bg-paper text-[9px] text-ink-faint">Locked</div>;
   return (
-    <div className="relative h-16 w-16 shrink-0 overflow-hidden border border-rule">
-      {/* Locked teasers are heavily blurred + scaled so the product can't be identified or reverse-searched at a glance. */}
-      <img src={src} alt={alt} className="h-full w-full object-cover" style={blurred ? { filter: 'blur(10px)', transform: 'scale(1.3)' } : undefined} />
-      {blurred && <div className="absolute inset-0 flex items-center justify-center text-lg">🔒</div>}
+    <div className="group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-rule">
+      {/* Full blur at rest so the product can't be identified or reverse-searched;
+          softens to a light haze on hover/tap-hold as a "peek" — never a full reveal. */}
+      <img
+        src={src}
+        alt={alt}
+        className="h-full w-full object-cover transition-[filter] duration-200"
+        style={blurred ? { filter: 'blur(10px)', transform: 'scale(1.3)' } : undefined}
+      />
+      {blurred && (
+        <>
+          <img
+            src={src}
+            alt=""
+            aria-hidden
+            className="absolute inset-0 h-full w-full scale-[1.3] object-cover opacity-0 blur-[3px] transition-opacity duration-200 group-hover:opacity-100 group-active:opacity-100"
+          />
+          <span className="absolute bottom-1 left-1 rounded-md bg-ink px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-paper">Pro</span>
+        </>
+      )}
     </div>
   );
 }
@@ -32,13 +48,13 @@ function WinnerCard({ w }: { w: LibraryWinner }) {
   });
 
   return (
-    <div className="border border-rule bg-paper-raised p-4 shadow-raised">
+    <div className="rounded-2xl border border-rule bg-paper-raised p-4 shadow-raised">
       <div className="flex gap-3">
         <Thumb src={w.imageUrl} blurred={w.blurred} alt={w.productTitle} />
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <p className={`font-medium ${w.unlocked ? 'text-ink' : 'text-ink-muted'}`}>{w.productTitle}</p>
-            <span className="shrink-0 rounded-sm bg-ochre/20 px-2 py-0.5 text-xs font-semibold text-ochre">score {Math.round(w.score)}</span>
+            <Badge tone="ochre" className="shrink-0">score {Math.round(w.score)}</Badge>
           </div>
           <p className="mt-0.5 text-xs text-ink-muted">
             {w.ebaySoldCount.toLocaleString()} sold · median {money(w.ebayMedianPriceCents)} · margin {money(w.marginCents)} ({w.marginPercent}%)
