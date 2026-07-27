@@ -79,15 +79,20 @@ export interface CreditsResponse {
 
 export interface LibraryWinner {
   id: string;
-  keyword: string;
   productTitle: string;
   imageUrl: string | null;
+  blurred: boolean;
   ebaySoldCount: number;
   ebayMedianPriceCents: number;
   marginCents: number;
   marginPercent: number;
   score: number;
   unlocked: boolean;
+}
+
+export interface LibraryResponse {
+  access: boolean;
+  winners: LibraryWinner[];
 }
 
 export interface LeaderboardWinner {

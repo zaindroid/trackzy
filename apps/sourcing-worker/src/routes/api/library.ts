@@ -23,6 +23,23 @@ function startOfUtcDay(ms: number): number {
   return Math.floor(ms / 86_400_000) * 86_400_000;
 }
 
+// Golden Products are gated to Pro subscribers, and only the top slice is shown.
+const GOLDEN_TOP_N = 20;
+
+function isProActive(acct: { plan?: string | null; subscriptionStatus?: string | null } | undefined): boolean {
+  return acct?.plan === 'pro' && acct?.subscriptionStatus === 'active';
+}
+
+// Teaser redaction — reveal enough to create desire (a hint + the numbers) but
+// NOT the full title, so a user can't just copy it into AliExpress/eBay and
+// bypass unlocking. Shows the first ~half of the words, masks the rest.
+function redactTitle(title: string): string {
+  const words = title.trim().split(/\s+/).filter(Boolean);
+  if (words.length <= 1) return '••••••';
+  const keep = Math.max(1, Math.floor(words.length / 2));
+  return `${words.slice(0, keep).join(' ')} ••••••`;
+}
+
 /**
  * The winners library — a browsable catalog of vetted products (teasers). The
  * money signals (demand, margin %, score, price) are shown to create desire,
@@ -33,22 +50,36 @@ function startOfUtcDay(ms: number): number {
 app.get('/', async (c) => {
   const db = createDb(c.env.SOURCING_DB);
   const userId = c.get('userId');
-  const rows = await db.select().from(winners).where(eq(winners.reserved, 0)).orderBy(desc(winners.score)).limit(100);
+  const [acct] = await db.select().from(creditAccounts).where(eq(creditAccounts.userId, userId));
+
+  // Golden Products is a Pro-only vault. Non-Pro get an upsell, not the goods.
+  if (!isProActive(acct)) {
+    return c.json({ access: false, winners: [] });
+  }
+
+  const rows = await db.select().from(winners).where(eq(winners.reserved, 0)).orderBy(desc(winners.score)).limit(GOLDEN_TOP_N);
   const unlocked = new Set((await db.select().from(winnerUnlocks).where(eq(winnerUnlocks.userId, userId))).map((u) => u.winnerId));
 
   return c.json({
-    winners: rows.map((w) => ({
-      id: w.id,
-      keyword: w.keyword,
-      productTitle: w.productTitle,
-      imageUrl: (JSON.parse(w.imageUrlsJson) as string[])[0] ?? null,
-      ebaySoldCount: w.ebaySoldCount,
-      ebayMedianPriceCents: w.ebayMedianPriceCents,
-      marginCents: w.marginCents,
-      marginPercent: w.marginPercent,
-      score: w.score,
-      unlocked: unlocked.has(w.id),
-    })),
+    access: true,
+    winners: rows.map((w) => {
+      const isUnlocked = unlocked.has(w.id);
+      const image = (JSON.parse(w.imageUrlsJson) as string[])[0] ?? null;
+      return {
+        id: w.id,
+        // Full title/clear image only once unlocked; otherwise a redacted teaser
+        // (client blurs the image) so the product can't be self-sourced.
+        productTitle: isUnlocked ? w.productTitle : redactTitle(w.productTitle),
+        imageUrl: image,
+        blurred: !isUnlocked,
+        ebaySoldCount: w.ebaySoldCount,
+        ebayMedianPriceCents: w.ebayMedianPriceCents,
+        marginCents: w.marginCents,
+        marginPercent: w.marginPercent,
+        score: w.score,
+        unlocked: isUnlocked,
+      };
+    }),
   });
 });
 
@@ -66,9 +97,9 @@ app.get('/leaderboard', async (c) => {
   return c.json({
     winners: rows.map((w) => ({
       id: w.id,
-      keyword: w.keyword,
-      productTitle: w.productTitle,
-      imageUrl: (JSON.parse(w.imageUrlsJson) as string[])[0] ?? null,
+      // Redacted — the leaderboard is the public hook: show the numbers and a
+      // teaser, not the identifiable product (that's unlocked in Golden Products).
+      productTitle: redactTitle(w.productTitle),
       score: w.score,
       ebaySoldCount: w.ebaySoldCount,
       marginCents: w.marginCents,

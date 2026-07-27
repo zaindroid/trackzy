@@ -46,16 +46,34 @@ beforeEach(async () => {
   await db.insert(users).values({ id: 'usr_lib', clerkUserId: 'lib-user', email: 'lib@test.dev', createdAt: 0 }).onConflictDoNothing();
 });
 
-describe('winners library', () => {
-  it('lists teasers without the supplier link', async () => {
+async function makePro(db: ReturnType<typeof createDb>) {
+  await SELF.fetch(BASE, { headers: AUTH }); // provision + trial grant
+  await db.update(creditAccounts).set({ plan: 'pro', subscriptionStatus: 'active' }).where(eq(creditAccounts.userId, 'usr_lib'));
+}
+
+describe('Golden Products (winners library)', () => {
+  it('is gated: non-Pro users get access:false and no winners', async () => {
     const db = createDb(env.SOURCING_DB);
     await db.insert(winners).values(winnerRow());
     const res = await SELF.fetch(BASE, { headers: AUTH });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { winners: { id: string; productTitle: string; unlocked: boolean }[] };
+    const body = (await res.json()) as { access: boolean; winners: unknown[] };
+    expect(body.access).toBe(false);
+    expect(body.winners).toHaveLength(0);
+  });
+
+  it('for Pro: lists REDACTED teasers (no full title, no supplier link)', async () => {
+    const db = createDb(env.SOURCING_DB);
+    await db.insert(winners).values(winnerRow());
+    await makePro(db);
+    const res = await SELF.fetch(BASE, { headers: AUTH });
+    const body = (await res.json()) as { access: boolean; winners: { productTitle: string; blurred: boolean; unlocked: boolean }[] };
+    expect(body.access).toBe(true);
     expect(body.winners).toHaveLength(1);
-    expect(body.winners[0]).not.toHaveProperty('supplierProductUrl'); // teaser hides the link
-    expect(body.winners[0]!.unlocked).toBe(false);
+    expect(body.winners[0]!.productTitle).toContain('••'); // redacted, not the full title
+    expect(body.winners[0]!.productTitle).not.toContain('Grinder');
+    expect(body.winners[0]!.blurred).toBe(true);
+    expect(body.winners[0]).not.toHaveProperty('supplierProductUrl');
   });
 
   it('unlocks a fresh winner: charges a credit, copies a draft, reveals supplier', async () => {
