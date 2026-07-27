@@ -9,7 +9,7 @@ import { errorResponse } from '../../lib/errors.js';
 import { newId, now } from '../../lib/id.js';
 import { CREDIT_COSTS, InsufficientCreditsError, spendCredits } from '../../lib/credits.js';
 import { cachedDemand } from '../../lib/demandCache.js';
-import { WINNER_FRESH_MS } from '../../lib/winners.js';
+import { WINNER_FRESH_MS, recentScores, snapshotWinnerScore } from '../../lib/winners.js';
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVariables }>();
 
@@ -68,9 +68,10 @@ app.get('/', async (c) => {
       return {
         id: w.id,
         // Full title/clear image only once unlocked; otherwise a redacted teaser
-        // (client blurs the image) so the product can't be self-sourced.
+        // served via the proxy (raw supplier URL never exposed) so the product
+        // can't be self-sourced.
         productTitle: isUnlocked ? w.productTitle : redactTitle(w.productTitle),
-        imageUrl: image,
+        imageUrl: isUnlocked ? image : `/winner-image/${w.id}`,
         blurred: !isUnlocked,
         ebaySoldCount: w.ebaySoldCount,
         ebayMedianPriceCents: w.ebayMedianPriceCents,
@@ -94,20 +95,27 @@ app.get('/leaderboard', async (c) => {
   const db = createDb(c.env.SOURCING_DB);
   const rows = await db.select().from(winners).where(eq(winners.reserved, 0)).orderBy(desc(winners.score)).limit(50);
   const weekAgo = now() - 7 * 86_400_000;
+  const sparks = await recentScores(db, rows.map((w) => w.id));
   return c.json({
-    winners: rows.map((w) => ({
-      id: w.id,
-      // Redacted — the leaderboard is the public hook: show the numbers and a
-      // teaser, not the identifiable product (that's unlocked in Golden Products).
-      productTitle: redactTitle(w.productTitle),
-      imageUrl: (JSON.parse(w.imageUrlsJson) as string[])[0] ?? null, // client blurs it
-      score: w.score,
-      ebaySoldCount: w.ebaySoldCount,
-      marginCents: w.marginCents,
-      marginPercent: w.marginPercent,
-      timesUnlocked: w.timesUnlocked,
-      isNew: w.createdAt >= weekAgo,
-    })),
+    winners: rows.map((w) => {
+      const spark = sparks.get(w.id) ?? [w.score];
+      const scoreDelta = spark.length > 1 ? Math.round((w.score - spark[0]!) * 10) / 10 : 0; // vs oldest point in window
+      return {
+        id: w.id,
+        // Redacted — the leaderboard is the public hook: show the numbers and a
+        // teaser, not the identifiable product (that's unlocked in Golden Products).
+        productTitle: redactTitle(w.productTitle),
+        imageUrl: `/winner-image/${w.id}`, // proxied teaser — raw supplier URL never exposed
+        score: w.score,
+        scoreDelta,
+        spark, // chronological recent daily scores for a sparkline
+        ebaySoldCount: w.ebaySoldCount,
+        marginCents: w.marginCents,
+        marginPercent: w.marginPercent,
+        timesUnlocked: w.timesUnlocked,
+        isNew: w.createdAt >= weekAgo,
+      };
+    }),
   });
 });
 
@@ -146,6 +154,7 @@ app.post('/:id/unlock', async (c) => {
         score = computeSourcingScore({ totalSold: ebaySoldCount, marginPercent, medianPriceCents: ebayMedianPriceCents });
       }
       await db.update(winners).set({ score, marginCents, marginPercent, ebaySoldCount, ebayMedianPriceCents, lastScoredAt: now(), updatedAt: now() }).where(eq(winners.id, winner.id));
+      await snapshotWinnerScore(db, winner.id, score, ebaySoldCount, marginCents).catch(() => {});
     } catch (err) {
       console.error('[library] freshness re-check failed:', err);
     }

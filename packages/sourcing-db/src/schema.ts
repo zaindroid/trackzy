@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, check, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, check, uniqueIndex, index } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
 
 // The sourcing portal's OWN database — fully independent of trackzy's
@@ -138,6 +138,25 @@ export const winners = sqliteTable(
   },
   (t) => ({
     normalizedKeyUnique: uniqueIndex('winners_normalized_key_unique').on(t.normalizedKey),
+  }),
+);
+
+// Daily score snapshots per winner — powers the leaderboard's moving charts
+// (sparklines + ↑/↓ rank/score deltas). At most one row per winner per UTC day.
+export const winnerScoreHistory = sqliteTable(
+  'winner_score_history',
+  {
+    id: text('id').primaryKey(),
+    winnerId: text('winner_id')
+      .notNull()
+      .references(() => winners.id),
+    score: real('score').notNull(),
+    ebaySoldCount: integer('ebay_sold_count').notNull(),
+    marginCents: integer('margin_cents').notNull(),
+    capturedAt: integer('captured_at').notNull(),
+  },
+  (t) => ({
+    winnerCapturedIdx: index('winner_score_history_winner_idx').on(t.winnerId, t.capturedAt),
   }),
 );
 

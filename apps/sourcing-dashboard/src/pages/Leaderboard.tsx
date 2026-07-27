@@ -15,6 +15,24 @@ const METRICS: { key: Metric; label: string; format: (w: LeaderboardWinner) => s
 
 const RANK_COLORS = ['bg-signal', 'bg-moss', 'bg-ochre'];
 
+/** Tiny inline sparkline of a winner's recent daily scores. */
+function Sparkline({ points }: { points: number[] }) {
+  if (points.length < 2) return <div className="h-6 w-16" />;
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const range = max - min || 1;
+  const w = 64;
+  const h = 24;
+  const d = points
+    .map((p, i) => `${(i / (points.length - 1)) * w},${h - ((p - min) / range) * h}`)
+    .join(' ');
+  return (
+    <svg width={w} height={h} className="shrink-0" aria-hidden>
+      <polyline points={d} fill="none" stroke="currentColor" strokeWidth="1.5" className="text-ink-muted" />
+    </svg>
+  );
+}
+
 export function LeaderboardPage() {
   const { getToken } = useAuthToken();
   const [metric, setMetric] = useState<Metric>('score');
@@ -76,7 +94,15 @@ export function LeaderboardPage() {
                   <div className={`h-full rounded-full ${RANK_COLORS[i] ?? 'bg-rule'} transition-all duration-700`} style={{ width: `${pct}%` }} />
                 </div>
               </div>
-              <span className="shrink-0 font-display text-lg font-bold tabular-nums text-ink">{fmt(w)}</span>
+              {metric === 'score' && <Sparkline points={w.spark} />}
+              <div className="flex shrink-0 flex-col items-end">
+                <span className="font-display text-lg font-bold tabular-nums text-ink">{fmt(w)}</span>
+                {metric === 'score' && w.scoreDelta !== 0 && (
+                  <span className={`text-[10px] font-semibold tabular-nums ${w.scoreDelta > 0 ? 'text-moss' : 'text-brick'}`}>
+                    {w.scoreDelta > 0 ? '▲' : '▼'} {Math.abs(w.scoreDelta)}
+                  </span>
+                )}
+              </div>
             </div>
           );
         })}

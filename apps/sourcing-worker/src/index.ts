@@ -6,6 +6,7 @@ import oauthRoutes from './routes/oauth.js';
 import ebayDeletionRoutes from './routes/webhooks.ebay-deletion.js';
 import radarIngestRoutes from './routes/ingest.radar.js';
 import lemonSqueezyWebhook from './routes/webhooks.lemonsqueezy.js';
+import winnerImageRoutes from './routes/winnerImage.js';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -23,6 +24,9 @@ app.route('/ingest/radar', radarIngestRoutes);
 // Lemon Squeezy billing webhook (unauthenticated — LS calls it; verified via
 // X-Signature HMAC). Grants credits / updates subscriptions.
 app.route('/webhooks/lemonsqueezy', lemonSqueezyWebhook);
+// Public teaser-image proxy (blurred/downscaled) so raw supplier URLs never
+// reach locked library/leaderboard cards. Unauthenticated by design (img tags).
+app.route('/winner-image', winnerImageRoutes);
 
 // Static dashboard (Workers Assets) fallback for everything else.
 app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));

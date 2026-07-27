@@ -100,6 +100,8 @@ export interface LeaderboardWinner {
   productTitle: string;
   imageUrl: string | null;
   score: number;
+  scoreDelta: number;
+  spark: number[];
   ebaySoldCount: number;
   marginCents: number;
   marginPercent: number;
