@@ -18,6 +18,7 @@ import type { Env } from '../env.js';
 import { newId, now } from '../lib/id.js';
 import { draftDispute } from '../lib/draftDispute.js';
 import { placeSupplierOrder } from '../lib/placeSupplierOrder.js';
+import { meterFulfillment } from '../lib/meterFulfillment.js';
 import type { TrackingReceivedEvent } from './types.js';
 
 const MAX_TRACKING_TIMEOUT_RETRIES = 3; // initial wait + up to 2 more, per spec section 7 step 4
@@ -185,6 +186,9 @@ export async function placeSupplierOrderStep(
   // OrderSourceOrder.shipTo through explicitly. See DECISIONS.md.
   const fulfillmentId = await placeSupplierOrder(db, env, orderId, supplierId, supplierCostCents);
   await db.update(orders).set({ status: 'fulfilling', updatedAt: now() }).where(eq(orders.id, orderId));
+  // Meter this fulfillment against the Zearch platform credit balance
+  // (best-effort, dormant unless configured — never blocks fulfillment).
+  await meterFulfillment(db, env, orderId);
   return fulfillmentId;
 }
 

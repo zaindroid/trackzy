@@ -7,6 +7,7 @@ import ebayDeletionRoutes from './routes/webhooks.ebay-deletion.js';
 import radarIngestRoutes from './routes/ingest.radar.js';
 import lemonSqueezyWebhook from './routes/webhooks.lemonsqueezy.js';
 import winnerImageRoutes from './routes/winnerImage.js';
+import internalRoutes from './routes/internal.js';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -27,6 +28,8 @@ app.route('/webhooks/lemonsqueezy', lemonSqueezyWebhook);
 // Public teaser-image proxy (blurred/downscaled) so raw supplier URLs never
 // reach locked library/leaderboard cards. Unauthenticated by design (img tags).
 app.route('/winner-image', winnerImageRoutes);
+// Service-to-service (trackzy → sourcing) — token-guarded, no Clerk.
+app.route('/internal', internalRoutes);
 
 // Static dashboard (Workers Assets) fallback for everything else.
 app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));

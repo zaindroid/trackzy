@@ -54,6 +54,10 @@ export interface Env {
   // must present to POST results to /ingest/radar. Set via `wrangler secret put`.
   RADAR_INGEST_TOKEN?: string;
 
+  // Shared secret for service-to-service calls from the trackzy worker (e.g. the
+  // fulfillment-charge meter). Set on both workers via `wrangler secret put`.
+  INTERNAL_SERVICE_TOKEN?: string;
+
   // Lemon Squeezy (merchant-of-record) billing. API key + store id create
   // checkouts; the webhook secret verifies inbound events. Variant ids come
   // from the LS dashboard once products exist (billing stays disabled until set).

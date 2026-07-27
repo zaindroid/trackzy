@@ -1,5 +1,5 @@
 import { creditAccounts, creditLedger, type Database } from '@sourcing/db';
-import { eq } from 'drizzle-orm';
+import { and, eq, gte, sql } from 'drizzle-orm';
 import { newId, now } from './id.js';
 
 // Signup trial grant — generous enough to complete the whole loop (unlock a few
@@ -67,12 +67,46 @@ export async function addCredits(db: Database, userId: string, amount: number, r
  * the balance can't cover it. Single-writer per user in practice, so the
  * read-check-write is safe enough for D1 here.
  */
-export async function spendCredits(db: Database, userId: string, cost: number, reason: CreditReason, refId?: string): Promise<number> {
-  const acct = await ensureAccount(db, userId);
-  if (acct.balance < cost) throw new InsufficientCreditsError(cost, acct.balance);
+/**
+ * Charges for a fulfilled order — idempotent per order (refId), and ALLOWS the
+ * balance to go negative. Fulfillment happens post-sale (the buyer already
+ * paid), so we must never block or fail it on credits; instead we accrue the
+ * charge as debt the seller tops up. Returns the new balance, or null if this
+ * order was already charged.
+ */
+export async function chargeFulfillment(db: Database, userId: string, cost: number, orderRefId: string): Promise<number | null> {
+  await ensureAccount(db, userId);
+  // Idempotency: skip if we've already charged this order.
+  const [seen] = await db
+    .select({ id: creditLedger.id })
+    .from(creditLedger)
+    .where(and(eq(creditLedger.userId, userId), eq(creditLedger.reason, 'fulfill'), eq(creditLedger.refId, orderRefId)))
+    .limit(1);
+  if (seen) return null;
+
   const ts = now();
-  const balance = acct.balance - cost;
-  await db.update(creditAccounts).set({ balance, updatedAt: ts }).where(eq(creditAccounts.userId, userId));
-  await db.insert(creditLedger).values({ id: newId(), userId, delta: -cost, balanceAfter: balance, reason, refId: refId ?? null, createdAt: ts });
+  const [row] = await db
+    .update(creditAccounts)
+    .set({ balance: sql`${creditAccounts.balance} - ${cost}`, updatedAt: ts })
+    .where(eq(creditAccounts.userId, userId))
+    .returning({ balance: creditAccounts.balance });
+  const balance = row?.balance ?? -cost;
+  await db.insert(creditLedger).values({ id: newId(), userId, delta: -cost, balanceAfter: balance, reason: 'fulfill', refId: orderRefId, createdAt: ts });
   return balance;
+}
+
+export async function spendCredits(db: Database, userId: string, cost: number, reason: CreditReason, refId?: string): Promise<number> {
+  await ensureAccount(db, userId);
+  const ts = now();
+  // ATOMIC: decrement only if the balance still covers it (guards against
+  // concurrent double-spend — a plain read-then-write could oversell). The
+  // conditional UPDATE ... RETURNING is a single SQLite statement.
+  const [row] = await db
+    .update(creditAccounts)
+    .set({ balance: sql`${creditAccounts.balance} - ${cost}`, updatedAt: ts })
+    .where(and(eq(creditAccounts.userId, userId), gte(creditAccounts.balance, cost)))
+    .returning({ balance: creditAccounts.balance });
+  if (!row) throw new InsufficientCreditsError(cost, await getBalance(db, userId));
+  await db.insert(creditLedger).values({ id: newId(), userId, delta: -cost, balanceAfter: row.balance, reason, refId: refId ?? null, createdAt: ts });
+  return row.balance;
 }

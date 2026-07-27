@@ -193,40 +193,42 @@ app.post('/:id/unlock', async (c) => {
     await db.update(winners).set({ timesUnlocked: winner.timesUnlocked + 1 }).where(eq(winners.id, winner.id));
   }
 
-  // Copy into the user's candidates as a list-ready draft (idempotent-ish: a new
-  // draft each unlock is fine; users can dismiss). Then return full detail.
+  // Copy into the user's candidates as a list-ready draft — only on the FIRST
+  // unlock, so repeat views don't pile up duplicate drafts. Then return detail.
   const imageUrls = JSON.parse(winner.imageUrlsJson) as string[];
   const candidateId = newId();
-  try {
-    await db.insert(productCandidates).values({
-      id: candidateId,
-      userId,
-      runId: null,
-      keyword: winner.keyword,
-      ebayAvgSoldPriceCents: ebayMedianPriceCents,
-      ebayMedianPriceCents,
-      ebaySoldCount,
-      supplierProvider: winner.supplierProvider,
-      supplierProductId: winner.supplierProductId,
-      supplierCostCents,
-      supplierProductUrl: winner.supplierProductUrl,
-      supplierImageUrlsJson: winner.imageUrlsJson,
-      marginCents,
-      marginPercent,
-      opportunityScore: score,
-      suggestedSellPriceCents: ebayMedianPriceCents,
-      generatedTitle: winner.generatedTitle,
-      generatedDescription: winner.generatedDescription,
-      generatedAspectsJson: winner.generatedAspectsJson,
-      categoryId: null,
-      status: 'draft',
-      ebayItemId: null,
-      sku: null,
-      createdAt: now(),
-      updatedAt: now(),
-    });
-  } catch (err) {
-    console.error('[library] candidate copy failed:', err);
+  if (!already) {
+    try {
+      await db.insert(productCandidates).values({
+        id: candidateId,
+        userId,
+        runId: null,
+        keyword: winner.keyword,
+        ebayAvgSoldPriceCents: ebayMedianPriceCents,
+        ebayMedianPriceCents,
+        ebaySoldCount,
+        supplierProvider: winner.supplierProvider,
+        supplierProductId: winner.supplierProductId,
+        supplierCostCents,
+        supplierProductUrl: winner.supplierProductUrl,
+        supplierImageUrlsJson: winner.imageUrlsJson,
+        marginCents,
+        marginPercent,
+        opportunityScore: score,
+        suggestedSellPriceCents: ebayMedianPriceCents,
+        generatedTitle: winner.generatedTitle,
+        generatedDescription: winner.generatedDescription,
+        generatedAspectsJson: winner.generatedAspectsJson,
+        categoryId: null,
+        status: 'draft',
+        ebayItemId: null,
+        sku: null,
+        createdAt: now(),
+        updatedAt: now(),
+      });
+    } catch (err) {
+      console.error('[library] candidate copy failed:', err);
+    }
   }
 
   return c.json({

@@ -70,4 +70,10 @@ export interface Env {
 
   // Multi-tenant self-serve connections (see DECISIONS.md)
   CREDENTIAL_ENCRYPTION_KEY?: string;
+
+  // Zearch platform credit metering (best-effort). When both are set, trackzy
+  // charges a fulfillment credit to the Zearch balance on each auto-fulfilled
+  // order. Dormant (no-op) unless configured, so existing trackzy is unaffected.
+  SOURCING_BASE_URL?: string;
+  INTERNAL_SERVICE_TOKEN?: string;
 }
