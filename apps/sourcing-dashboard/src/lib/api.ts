@@ -77,6 +77,19 @@ export interface CreditsResponse {
   ledger: CreditLedgerEntry[];
 }
 
+export interface LibraryWinner {
+  id: string;
+  keyword: string;
+  productTitle: string;
+  imageUrl: string | null;
+  ebaySoldCount: number;
+  ebayMedianPriceCents: number;
+  marginCents: number;
+  marginPercent: number;
+  score: number;
+  unlocked: boolean;
+}
+
 export class ApiError extends Error {
   constructor(
     public code: string,

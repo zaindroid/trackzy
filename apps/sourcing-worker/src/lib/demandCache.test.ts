@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, vi } from 'vitest';
+import { describe, expect, it, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import { createDb, demandCache } from '@sourcing/db';
 import type { EbayDemandResult, ScraperEbayClient } from '@fulfillment-tracker/adapters/scraperEbay';

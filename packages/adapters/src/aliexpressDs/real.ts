@@ -126,8 +126,11 @@ export class RealAliexpressDsClient implements AliexpressDsClient {
       body: new URLSearchParams(params),
     });
     if (!res.ok) throw new Error(`AliExpress DS search failed: ${res.status} ${(await res.text()).slice(0, 200)}`);
-    const json = (await res.json()) as any;
-    if (json?.error_response) throw new Error(`AliExpress DS error: ${JSON.stringify(json.error_response).slice(0, 200)}`);
+    const json = (await res.json()) as {
+      error_response?: unknown;
+      aliexpress_ds_text_search_response?: { data?: { products?: { selection_search_product?: DsProduct[] } } };
+    };
+    if (json.error_response) throw new Error(`AliExpress DS error: ${JSON.stringify(json.error_response).slice(0, 200)}`);
 
     const list: DsProduct[] = json?.aliexpress_ds_text_search_response?.data?.products?.selection_search_product ?? [];
     return list

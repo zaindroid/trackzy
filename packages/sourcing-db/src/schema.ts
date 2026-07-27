@@ -101,6 +101,65 @@ export const creditLedger = sqliteTable('credit_ledger', {
   createdAt: integer('created_at').notNull(),
 });
 
+// The proprietary "winners library" — a GLOBAL, accumulating store of vetted
+// high-score products found across every user's research (and, later, Radar).
+// Deduped per niche (normalized_key unique), keeping the best-scoring find. It's
+// the compounding data moat: browsable as teasers (free), unlockable for the
+// full sourcing detail + list-ready content (credits / subscription). A
+// `reserved` subset is held back from the library to drip into Radar over time.
+// Before serving a stored winner its score is RE-CHECKED that day (freshness),
+// because a past winner can decay — quality must hold.
+export const winners = sqliteTable(
+  'winners',
+  {
+    id: text('id').primaryKey(),
+    normalizedKey: text('normalized_key').notNull(),
+    keyword: text('keyword').notNull(),
+    productTitle: text('product_title').notNull(),
+    imageUrlsJson: text('image_urls_json').notNull(),
+    supplierProvider: text('supplier_provider').notNull(),
+    supplierProductId: text('supplier_product_id').notNull(),
+    supplierCostCents: integer('supplier_cost_cents').notNull(),
+    supplierProductUrl: text('supplier_product_url'),
+    ebaySoldCount: integer('ebay_sold_count').notNull(),
+    ebayMedianPriceCents: integer('ebay_median_price_cents').notNull(),
+    marginCents: integer('margin_cents').notNull(),
+    marginPercent: real('margin_percent').notNull(),
+    score: real('score').notNull(),
+    // List-ready AI content, so an unlock yields an instantly-listable product.
+    generatedTitle: text('generated_title').notNull(),
+    generatedDescription: text('generated_description').notNull(),
+    generatedAspectsJson: text('generated_aspects_json').notNull(),
+    reserved: integer('reserved').notNull().default(0), // held back for the Radar drip
+    timesUnlocked: integer('times_unlocked').notNull().default(0),
+    lastScoredAt: integer('last_scored_at').notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => ({
+    normalizedKeyUnique: uniqueIndex('winners_normalized_key_unique').on(t.normalizedKey),
+  }),
+);
+
+// Which library winners a user has unlocked (so re-viewing is free and we can
+// show "unlocked"). One row per (user, winner).
+export const winnerUnlocks = sqliteTable(
+  'winner_unlocks',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    winnerId: text('winner_id')
+      .notNull()
+      .references(() => winners.id),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => ({
+    userWinnerUnique: uniqueIndex('winner_unlocks_user_winner_unique').on(t.userId, t.winnerId),
+  }),
+);
+
 // Anti-abuse: each external seller/supplier account (eBay, AliExpress, CJ) may
 // bind to exactly ONE platform account, permanently — so trial credits can't be
 // farmed by cycling dummy signups (real verified eBay seller accounts are hard

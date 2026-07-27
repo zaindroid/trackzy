@@ -7,6 +7,7 @@ import type { Env } from '../env.js';
 import { newId, now } from '../lib/id.js';
 import { searchSupplier, type SourcingProvider } from '../lib/sourcingSupplier.js';
 import { cachedDemand, normalizeNiche } from '../lib/demandCache.js';
+import { upsertWinner } from '../lib/winners.js';
 
 // Deep search: the LLM expands one seed into many VARIED sub-niches and we
 // explore each (ScraperAPI demand + free AliExpress DS supplier), then keep only
@@ -105,6 +106,7 @@ export async function runResearch(env: Env, db: Database, userId: string, seed: 
       keyword: string;
       avgPriceCents: number;
       medianPriceCents: number;
+      key: string;
       totalSold: number;
       product: SourcedProduct;
       marginCents: number;
@@ -137,7 +139,7 @@ export async function runResearch(env: Env, db: Database, userId: string, seed: 
         // Quality gate — only genuine high-potential products get through.
         if (score < MIN_SCORE_TO_SURFACE) continue;
 
-        winners.push({ keyword, avgPriceCents, medianPriceCents, totalSold: demand.totalSold, product, marginCents, marginPercent, score });
+        winners.push({ keyword, key, avgPriceCents, medianPriceCents, totalSold: demand.totalSold, product, marginCents, marginPercent, score });
       } catch (err) {
         console.error(`[research] niche "${keyword}" failed:`, err);
       }
@@ -181,6 +183,26 @@ export async function runResearch(env: Env, db: Database, userId: string, seed: 
           createdAt: now(),
           updatedAt: now(),
         });
+
+        // Feed the global winners library (deduped per niche, best score kept).
+        await upsertWinner(db, {
+          normalizedKey: w.key,
+          keyword: w.keyword,
+          productTitle: w.product.title,
+          imageUrls,
+          supplierProvider: provider,
+          supplierProductId: w.product.productId,
+          supplierCostCents: w.product.costCents,
+          supplierProductUrl: w.product.productUrl ?? null,
+          ebaySoldCount: w.totalSold,
+          ebayMedianPriceCents: w.medianPriceCents,
+          marginCents: w.marginCents,
+          marginPercent: w.marginPercent,
+          score: w.score,
+          generatedTitle: content.title,
+          generatedDescription: content.descriptionHtml,
+          generatedAspectsJson: JSON.stringify(content.aspects),
+        }).catch((err) => console.error(`[research] upsertWinner "${w.keyword}" failed:`, err));
       } catch (err) {
         console.error(`[research] persisting winner "${w.keyword}" failed:`, err);
       }
