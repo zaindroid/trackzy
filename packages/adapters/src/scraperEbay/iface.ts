@@ -17,6 +17,15 @@ export interface EbayDemandResult {
   /** Sum of items_sold across the page — the real proven-demand signal. */
   totalSold: number;
   medianPriceCents: number;
+  /**
+   * Number of ACTIVE competing listings for the keyword — the competition
+   * denominator for a sell-through-rate signal (sold ÷ active). Taken from the
+   * search response's total-results count when present (so it costs no extra
+   * credit — it rides the same demand call), otherwise falls back to the size
+   * of the sampled page. May be undefined for cache rows written before this
+   * field existed; callers treat that as "unknown" (a neutral competition term).
+   */
+  activeListingCount?: number;
 }
 
 /**

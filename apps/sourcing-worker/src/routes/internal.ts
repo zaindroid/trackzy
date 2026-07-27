@@ -44,7 +44,8 @@ app.post('/fulfillment-charge', async (c) => {
 
 /**
  * Service-to-service endpoint that sweeps DUE monitored listings (re-fetch
- * supplier cost/stock, smart-reprice, supplier auto-switch on stock-out). No
+ * supplier cost/stock, smart-reprice, and on a stock-out pause + propose a
+ * replacement supplier for one-click approval — never auto-switching). No
  * Cloudflare cron trigger exists for this worker (account is at the 5-cron
  * limit — see wrangler.sourcing.toml), so trackzy pings this on one of its own
  * existing cron ticks (apps/worker/src/scheduled.ts). `monitorDue` only

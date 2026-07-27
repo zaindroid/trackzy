@@ -9,3 +9,4 @@ export * from './fuzzyMatch.js';
 export * from './matching.js';
 export * from './repricing.js';
 export * from './productOpportunity.js';
+export * from './veroScreen.js';

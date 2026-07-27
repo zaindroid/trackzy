@@ -37,26 +37,64 @@ export interface SourcingScoreSignals {
   marginPercent: number;
   /** Median sold price in cents — for price-band positioning. */
   medianPriceCents: number;
+  /**
+   * Active competing eBay listings for the niche — the competition denominator
+   * for sell-through rate (sold ÷ active). Optional: when undefined (or below the
+   * min-sample guard) the competition term is scored NEUTRAL rather than
+   * boosting/penalizing, so thin data can't skew the score hot or cold.
+   */
+  activeListingCount?: number;
+}
+
+// Weights (sum to 100): demand + margin dominate, price band and competition are
+// lighter shaping terms. Competition was the signal previously missing — two
+// niches with identical demand now score differently by how saturated they are.
+const DEMAND_MAX = 35;
+const MARGIN_MAX = 35;
+const PRICE_MAX = 15;
+const COMPETITION_MAX = 15;
+
+// Below these sample sizes the sell-through ratio is untrustworthy (e.g.
+// 2 sold / 1 active = 200%), so we award the neutral half-score instead.
+const MIN_SOLD_FOR_STR = 10;
+const MIN_ACTIVE_FOR_STR = 5;
+
+/**
+ * Sell-through rate as a bounded 0-1 factor: soldSample ÷ activeListings, capped
+ * at 1 (demand meeting or beating visible supply earns full marks). A saturated
+ * niche (many active listings, few sales) trends toward 0; a goldmine (sales
+ * outstrip supply) toward 1. Returns null when the sample is too thin to trust.
+ */
+export function sellThroughFactor(totalSold: number, activeListingCount: number | undefined): number | null {
+  if (activeListingCount == null || activeListingCount < MIN_ACTIVE_FOR_STR || totalSold < MIN_SOLD_FOR_STR) return null;
+  return Math.min(totalSold / activeListingCount, 1);
 }
 
 /**
  * Sourcing-portal opportunity score (0-100) — distinct from `computeOpportunityScore`
  * (which trackzy's Opportunities feature shares and which ignores margin). For a
- * dropshipping *sourcing* decision the two things that actually matter are
- * PROVEN DEMAND and MARGIN, with price-band as a lighter factor:
- *   - demand: log-scaled units sold (10→~17, 100→~34, 1000+→40 cap)
- *   - margin: linear, ~80% margin earns the full 40
- *   - price:  full marks in the $12-$80 impulse-buy-yet-profitable band
- * A genuinely strong product (real sales + fat margin + good price) lands ~90-100;
- * thin-margin or low-demand items fall well below the 70 quality gate the pipeline
- * applies, so only high-potential candidates surface.
+ * dropshipping *sourcing* decision the things that actually matter are PROVEN
+ * DEMAND, MARGIN, and — critically — how CONTESTED the niche is, with price-band
+ * as a lighter factor:
+ *   - demand:      log-scaled units sold (10→~12, 100→~24, 1000+→35 cap)
+ *   - margin:      linear, ~78% margin earns the full 35
+ *   - competition: sell-through rate (sold ÷ active listings) — low competition
+ *                  (few active listings vs demand) scores high; a saturated
+ *                  niche scores low; thin/absent data scores neutral (half)
+ *   - price:       full marks in the $12-$80 impulse-buy-yet-profitable band
+ * A genuinely strong product (real sales + fat margin + low competition + good
+ * price) lands ~90-100; thin-margin, low-demand, or heavily-saturated items fall
+ * below the 70 quality gate the pipeline applies, so only winners surface.
  */
 export function computeSourcingScore(signals: SourcingScoreSignals): number {
-  const demandScore = Math.min(Math.log10(Math.max(signals.totalSold, 0) + 1) * 17, 40);
-  const marginScore = Math.min(Math.max(signals.marginPercent, 0) * 0.5, 40);
+  const demandScore = Math.min(Math.log10(Math.max(signals.totalSold, 0) + 1) * 12, DEMAND_MAX);
+  const marginScore = Math.min(Math.max(signals.marginPercent, 0) * 0.45, MARGIN_MAX);
   const p = signals.medianPriceCents / 100;
-  const priceScore = p >= 12 && p <= 80 ? 20 : p >= 8 && p <= 150 ? 12 : 4;
-  return Math.round(Math.min(100, demandScore + marginScore + priceScore));
+  const priceScore = p >= 12 && p <= 80 ? PRICE_MAX : p >= 8 && p <= 150 ? PRICE_MAX * 0.6 : PRICE_MAX * 0.2;
+  const str = sellThroughFactor(signals.totalSold, signals.activeListingCount);
+  // Neutral (half) when the sample is too thin to trust — never a free boost.
+  const competitionScore = str == null ? COMPETITION_MAX * 0.5 : COMPETITION_MAX * str;
+  return Math.round(Math.min(100, demandScore + marginScore + priceScore + competitionScore));
 }
 
 export interface RepriceInput {

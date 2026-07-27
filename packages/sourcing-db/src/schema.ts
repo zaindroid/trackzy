@@ -165,6 +165,17 @@ export const listingMonitors = sqliteTable('listing_monitors', {
   lastAction: text('last_action'),
   lastReason: text('last_reason'),
   lastCheckedAt: integer('last_checked_at'),
+  // One-click supplier-switch proposal. On a stock-out we NEVER silently adopt a
+  // new supplier (risk of matching the wrong product); instead we pause the
+  // listing (safe default) and stash a *candidate* replacement here for the
+  // seller to approve (adopt + relist) or reject (stay paused) in one click.
+  // All null when there's no pending proposal.
+  suggestedSupplierProductId: text('suggested_supplier_product_id'),
+  suggestedSupplierCostCents: integer('suggested_supplier_cost_cents'),
+  suggestedSupplierUrl: text('suggested_supplier_url'),
+  suggestedSupplierImageUrl: text('suggested_supplier_image_url'),
+  suggestedSupplierTitle: text('suggested_supplier_title'),
+  suggestedAt: integer('suggested_at'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 });

@@ -6,7 +6,7 @@ import type { Env } from '../../env.js';
 import type { AuthedVariables } from '../../middleware/auth.js';
 import { errorResponse } from '../../lib/errors.js';
 import { now } from '../../lib/id.js';
-import { monitorOne } from '../../lib/priceMonitor.js';
+import { monitorOne, approveSupplierSwitch, rejectSupplierSwitch } from '../../lib/priceMonitor.js';
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVariables }>();
 
@@ -49,6 +49,19 @@ app.get('/', async (c) => {
         lastReason: m.lastReason,
         lastCheckedAt: m.lastCheckedAt,
         marginSpark: (sparkById.get(m.candidateId) ?? []).reverse(), // chronological
+        // Pending one-click supplier-switch proposal (null when none). Shown on
+        // the seller's own dashboard, so raw supplier fields are fine here (the
+        // redacted teasers are only for the public library/leaderboard).
+        pendingSwitch: m.suggestedSupplierProductId
+          ? {
+              supplierProductId: m.suggestedSupplierProductId,
+              costCents: m.suggestedSupplierCostCents,
+              url: m.suggestedSupplierUrl,
+              imageUrl: m.suggestedSupplierImageUrl,
+              title: m.suggestedSupplierTitle,
+              suggestedAt: m.suggestedAt,
+            }
+          : null,
       };
     }),
   });
@@ -89,6 +102,38 @@ app.post('/:candidateId/check', async (c) => {
   if (!candidate) return errorResponse(c, 'NOT_FOUND', 'Listing not found', 404);
   const action = await monitorOne(c.env, db, monitor, candidate);
   return c.json({ ok: true, action });
+});
+
+/**
+ * One-click APPROVE of a pending supplier switch: the seller confirms the
+ * proposed replacement is the same product — adopt it, re-price, and re-list.
+ */
+app.post('/:candidateId/switch/approve', async (c) => {
+  const db = createDb(c.env.SOURCING_DB);
+  const userId = c.get('userId');
+  const candidateId = c.req.param('candidateId');
+  const [monitor] = await db.select().from(listingMonitors).where(and(eq(listingMonitors.candidateId, candidateId), eq(listingMonitors.userId, userId)));
+  if (!monitor) return errorResponse(c, 'NOT_FOUND', 'Monitor not found', 404);
+  if (!monitor.suggestedSupplierProductId) return errorResponse(c, 'NOT_FOUND', 'No pending supplier switch to approve', 404);
+  const [candidate] = await db.select().from(productCandidates).where(eq(productCandidates.id, candidateId));
+  if (!candidate) return errorResponse(c, 'NOT_FOUND', 'Listing not found', 404);
+  const action = await approveSupplierSwitch(c.env, db, monitor, candidate);
+  return c.json({ ok: true, action });
+});
+
+/**
+ * One-click REJECT of a pending supplier switch: the seller decides it's not the
+ * same product — discard the proposal, leave the listing paused (safe default).
+ */
+app.post('/:candidateId/switch/reject', async (c) => {
+  const db = createDb(c.env.SOURCING_DB);
+  const userId = c.get('userId');
+  const candidateId = c.req.param('candidateId');
+  const [monitor] = await db.select().from(listingMonitors).where(and(eq(listingMonitors.candidateId, candidateId), eq(listingMonitors.userId, userId)));
+  if (!monitor) return errorResponse(c, 'NOT_FOUND', 'Monitor not found', 404);
+  if (!monitor.suggestedSupplierProductId) return errorResponse(c, 'NOT_FOUND', 'No pending supplier switch to reject', 404);
+  await rejectSupplierSwitch(db, monitor);
+  return c.json({ ok: true });
 });
 
 export default app;

@@ -126,6 +126,14 @@ export interface ListingMonitor {
   lastReason: string | null;
   lastCheckedAt: number | null;
   marginSpark: number[];
+  pendingSwitch: {
+    supplierProductId: string;
+    costCents: number | null;
+    url: string | null;
+    imageUrl: string | null;
+    title: string | null;
+    suggestedAt: number | null;
+  } | null;
 }
 
 /** A fulfillment order from the trackzy worker (cross-origin, same Clerk token). */

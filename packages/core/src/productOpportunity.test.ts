@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeListingMargin, computeOpportunityScore, computeSourcingScore, decideReprice } from './productOpportunity.js';
+import { computeListingMargin, computeOpportunityScore, computeSourcingScore, decideReprice, sellThroughFactor } from './productOpportunity.js';
 
 describe('decideReprice (smart auto-repricing brain)', () => {
   const base = {
@@ -45,13 +45,38 @@ describe('decideReprice (smart auto-repricing brain)', () => {
 });
 
 describe('computeSourcingScore', () => {
-  it('scores a strong product (high demand + fat margin + good price) near 100', () => {
-    expect(computeSourcingScore({ totalSold: 240, marginPercent: 80, medianPriceCents: 1500 })).toBeGreaterThanOrEqual(90);
+  it('scores a strong product (high demand + fat margin + low competition + good price) near 100', () => {
+    // 500 sold against only 50 active listings → sell-through ≥ 1 → full competition marks.
+    expect(computeSourcingScore({ totalSold: 500, marginPercent: 80, medianPriceCents: 1500, activeListingCount: 50 })).toBeGreaterThanOrEqual(90);
   });
 
-  it('keeps a decent product above the 70 gate', () => {
-    // ~20 sold, 60% margin, $20 → should clear 70.
-    expect(computeSourcingScore({ totalSold: 20, marginPercent: 60, medianPriceCents: 2000 })).toBeGreaterThanOrEqual(70);
+  it('keeps a decent low-competition product above the 70 gate', () => {
+    // ~40 sold vs 40 active (STR 1), 60% margin, $20 → clears 70.
+    expect(computeSourcingScore({ totalSold: 40, marginPercent: 60, medianPriceCents: 2000, activeListingCount: 40 })).toBeGreaterThanOrEqual(70);
+  });
+
+  it('DROPS a saturated niche below the gate even with identical demand + margin', () => {
+    // Same 40 sold / 60% margin / $20, but 4000 active listings → STR 0.01 → a
+    // bloodbath. This is the whole point of the competition term.
+    const goldmine = computeSourcingScore({ totalSold: 40, marginPercent: 60, medianPriceCents: 2000, activeListingCount: 40 });
+    const bloodbath = computeSourcingScore({ totalSold: 40, marginPercent: 60, medianPriceCents: 2000, activeListingCount: 4000 });
+    expect(bloodbath).toBeLessThan(goldmine);
+    expect(bloodbath).toBeLessThan(70);
+  });
+
+  it('treats thin/absent competition data as neutral (no free boost, no penalty)', () => {
+    // No activeListingCount, and a sub-sample sold count → neutral half competition.
+    const neutral = computeSourcingScore({ totalSold: 40, marginPercent: 60, medianPriceCents: 2000 });
+    const full = computeSourcingScore({ totalSold: 40, marginPercent: 60, medianPriceCents: 2000, activeListingCount: 40 });
+    const none = computeSourcingScore({ totalSold: 40, marginPercent: 60, medianPriceCents: 2000, activeListingCount: 400000 });
+    expect(neutral).toBeGreaterThan(none);
+    expect(neutral).toBeLessThan(full);
+  });
+
+  it('does not let a tiny sample (2 sold / 1 active = 200%) dominate — min-sample guard', () => {
+    // Below the min-sample thresholds → neutral, NOT a full-competition boost.
+    expect(sellThroughFactor(2, 1)).toBeNull();
+    expect(computeSourcingScore({ totalSold: 2, marginPercent: 60, medianPriceCents: 2000, activeListingCount: 1 })).toBeLessThan(70);
   });
 
   it('drops a thin-margin low-demand product below the gate', () => {
@@ -59,7 +84,7 @@ describe('computeSourcingScore', () => {
   });
 
   it('never exceeds 100 and treats negative margin as zero', () => {
-    expect(computeSourcingScore({ totalSold: 100000, marginPercent: 300, medianPriceCents: 2000 })).toBe(100);
+    expect(computeSourcingScore({ totalSold: 100000, marginPercent: 300, medianPriceCents: 2000, activeListingCount: 10 })).toBe(100);
     expect(computeSourcingScore({ totalSold: 0, marginPercent: -50, medianPriceCents: 0 })).toBeGreaterThanOrEqual(0);
   });
 });

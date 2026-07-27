@@ -49,6 +49,14 @@ function MonitorCard({ m }: { m: ListingMonitor }) {
     mutationFn: () => apiFetch(`/monitor/${m.candidateId}/check`, getToken, { method: 'POST' }),
     onSuccess: invalidate,
   });
+  const approveSwitch = useMutation({
+    mutationFn: () => apiFetch(`/monitor/${m.candidateId}/switch/approve`, getToken, { method: 'POST' }),
+    onSuccess: invalidate,
+  });
+  const rejectSwitch = useMutation({
+    mutationFn: () => apiFetch(`/monitor/${m.candidateId}/switch/reject`, getToken, { method: 'POST' }),
+    onSuccess: invalidate,
+  });
 
   const saveRules = () => {
     patch.mutate({ minMarginPercent: Number(minMargin), priceCeilingCents: ceiling ? Math.round(Number(ceiling) * 100) : null });
@@ -72,6 +80,37 @@ function MonitorCard({ m }: { m: ListingMonitor }) {
             · stock <span className={m.stockStatus === 'out' ? 'text-brick' : 'text-ink-muted'}>{m.stockStatus}</span>
           </p>
           {m.lastReason && <p className="mt-1 text-xs italic text-ink-faint">{m.lastReason}</p>}
+
+          {m.pendingSwitch && (
+            <div className="mt-3 border border-ochre/40 bg-ochre/5 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-ochre">Out of stock — approve a replacement supplier?</p>
+              <p className="mt-1 text-xs text-ink-muted">
+                We paused this listing and found a possible replacement. Approve only if it's the <span className="font-medium text-ink">same product</span> — we never switch suppliers automatically.
+              </p>
+              <div className="mt-2 flex gap-3">
+                {m.pendingSwitch.imageUrl && (
+                  <img src={m.pendingSwitch.imageUrl} alt={m.pendingSwitch.title ?? 'candidate'} className="h-16 w-16 shrink-0 border border-rule object-cover" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="line-clamp-2 text-xs text-ink">{m.pendingSwitch.title ?? 'Replacement candidate'}</p>
+                  <p className="mt-0.5 text-xs text-ink-muted">new cost {money(m.pendingSwitch.costCents)}</p>
+                  {m.pendingSwitch.url && (
+                    <a href={m.pendingSwitch.url} target="_blank" rel="noreferrer" className="text-xs text-moss underline hover:text-ink">
+                      View on supplier ↗
+                    </a>
+                  )}
+                </div>
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <Button variant="primary" onClick={() => approveSwitch.mutate()} disabled={approveSwitch.isPending || rejectSwitch.isPending}>
+                  {approveSwitch.isPending ? 'Approving…' : 'Approve & relist'}
+                </Button>
+                <Button variant="secondary" onClick={() => rejectSwitch.mutate()} disabled={approveSwitch.isPending || rejectSwitch.isPending}>
+                  {rejectSwitch.isPending ? 'Dismissing…' : 'Keep paused'}
+                </Button>
+              </div>
+            </div>
+          )}
 
           <div className="mt-2 flex flex-wrap items-center gap-3">
             <Sparkline points={m.marginSpark} />
@@ -118,7 +157,7 @@ export function MonitorsPage() {
       <PageHeader
         eyebrow="Sell & fulfill"
         title="Price & stock monitor"
-        description="Every listing you publish is auto-monitored: we re-check the supplier's live cost and stock, hold your margin floor, price competitively, auto-switch suppliers on a stock-out, and pause anything that can't be sold profitably — so your store never quietly bleeds money."
+        description="Every listing you publish is auto-monitored: we re-check the supplier's live cost and stock, hold your margin floor, price competitively, and pause anything that can't be sold profitably. On a stock-out we pause the listing and surface a replacement supplier for your one-click approval — never switching automatically, so you're never shipping the wrong product."
       />
       {!query.isLoading && monitors.length === 0 && <EmptyState>No monitored listings yet — list a product from Research and it's enrolled automatically.</EmptyState>}
       <div className="flex flex-col gap-3">

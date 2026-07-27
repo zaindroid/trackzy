@@ -84,4 +84,58 @@ describe('price/stock monitor', () => {
     expect(m!.lastCheckedAt).not.toBeNull();
     expect(['healthy', 'warning', 'critical', 'paused']).toContain(m!.health);
   });
+
+  it('approves a pending supplier switch: adopts supplier, clears proposal, re-lists', async () => {
+    const db = createDb(env.SOURCING_DB);
+    await db.insert(productCandidates).values(listedCandidate('cand_mon'));
+    await db.insert(listingMonitors).values({
+      candidateId: 'cand_mon', userId: 'usr_mon', enabled: 1, minMarginPercent: 20,
+      stockStatus: 'out', health: 'paused',
+      suggestedSupplierProductId: 'AE-alt-9', suggestedSupplierCostCents: 400,
+      suggestedSupplierUrl: 'https://www.aliexpress.com/item/9.html', suggestedSupplierTitle: 'Alt', suggestedAt: 1,
+      createdAt: 0, updatedAt: 0,
+    });
+
+    const res = await SELF.fetch(`${BASE}/cand_mon/switch/approve`, { method: 'POST', headers: AUTH });
+    expect(res.status).toBe(200);
+
+    const [cand] = await db.select().from(productCandidates).where(eq(productCandidates.id, 'cand_mon'));
+    expect(cand!.supplierProductId).toBe('AE-alt-9'); // adopted
+    expect(cand!.supplierCostCents).toBe(400);
+
+    const [m] = await db.select().from(listingMonitors).where(eq(listingMonitors.candidateId, 'cand_mon'));
+    expect(m!.suggestedSupplierProductId).toBeNull(); // proposal cleared
+    expect(m!.lastAction).toBe('switch_approved');
+    expect(m!.stockStatus).toBe('in');
+  });
+
+  it('rejects a pending supplier switch: keeps supplier, clears proposal, stays paused', async () => {
+    const db = createDb(env.SOURCING_DB);
+    await db.insert(productCandidates).values(listedCandidate('cand_mon'));
+    await db.insert(listingMonitors).values({
+      candidateId: 'cand_mon', userId: 'usr_mon', enabled: 1, minMarginPercent: 20,
+      stockStatus: 'out', health: 'paused',
+      suggestedSupplierProductId: 'AE-alt-9', suggestedSupplierCostCents: 400, suggestedAt: 1,
+      createdAt: 0, updatedAt: 0,
+    });
+
+    const res = await SELF.fetch(`${BASE}/cand_mon/switch/reject`, { method: 'POST', headers: AUTH });
+    expect(res.status).toBe(200);
+
+    const [cand] = await db.select().from(productCandidates).where(eq(productCandidates.id, 'cand_mon'));
+    expect(cand!.supplierProductId).toBe('AE-mon-1'); // UNCHANGED — never adopted
+
+    const [m] = await db.select().from(listingMonitors).where(eq(listingMonitors.candidateId, 'cand_mon'));
+    expect(m!.suggestedSupplierProductId).toBeNull(); // proposal cleared
+    expect(m!.lastAction).toBe('switch_rejected');
+  });
+
+  it('returns 404 approving when there is no pending switch', async () => {
+    const db = createDb(env.SOURCING_DB);
+    await db.insert(productCandidates).values(listedCandidate('cand_mon'));
+    await db.insert(listingMonitors).values({ candidateId: 'cand_mon', userId: 'usr_mon', enabled: 1, minMarginPercent: 20, createdAt: 0, updatedAt: 0 });
+
+    const res = await SELF.fetch(`${BASE}/cand_mon/switch/approve`, { method: 'POST', headers: AUTH });
+    expect(res.status).toBe(404);
+  });
 });

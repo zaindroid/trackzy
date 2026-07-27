@@ -1,6 +1,6 @@
 import { productCandidates, researchRuns, sellerSettings, type Database } from '@sourcing/db';
 import { eq } from 'drizzle-orm';
-import { computeListingMargin, computeSourcingScore } from '@fulfillment-tracker/core';
+import { computeListingMargin, computeSourcingScore, screenVero } from '@fulfillment-tracker/core';
 import { createScraperEbayClient } from '@fulfillment-tracker/adapters/scraperEbay';
 import { createGeminiExtractor } from '@fulfillment-tracker/adapters/gemini';
 import type { Env } from '../env.js';
@@ -81,6 +81,14 @@ export async function runResearch(env: Env, db: Database, userId: string, seed: 
       const key = normalizeNiche(keyword);
       if (!key || seen.has(key)) continue;
       seen.add(key);
+      // VeRO gate #1 (before any paid work): drop brand/trademark/counterfeit-risk
+      // niches up front, so we never spend a demand credit — or surface a listing —
+      // on something that would get the seller's eBay account suspended.
+      const vero = screenVero(keyword);
+      if (vero.blocked) {
+        console.log(`[research] VeRO-skip niche "${keyword}" (matched ${vero.reason}: ${vero.matchedTerm})`);
+        continue;
+      }
       keywords.push({ keyword, key });
       if (keywords.length >= MAX_NICHES) break;
     }
@@ -97,7 +105,15 @@ export async function runResearch(env: Env, db: Database, userId: string, seed: 
       try {
         const products = await searchSupplier(env, db, userId, provider, keyword);
         const product = products?.[0];
-        if (product) sourceable.push({ keyword, key, product });
+        if (!product) continue;
+        // VeRO gate #2 (before scoring): a clean keyword can still match a BRANDED
+        // supplier product — screen the actual matched title and drop it if risky.
+        const vero = screenVero(product.title);
+        if (vero.blocked) {
+          console.log(`[research] VeRO-skip product "${product.title}" (matched ${vero.reason}: ${vero.matchedTerm})`);
+          continue;
+        }
+        sourceable.push({ keyword, key, product });
       } catch (err) {
         console.error(`[research] supplier search "${keyword}" failed:`, err);
       }
@@ -139,8 +155,10 @@ export async function runResearch(env: Env, db: Database, userId: string, seed: 
         });
         if (marginCents <= 0) continue;
 
-        const score = computeSourcingScore({ totalSold: demand.totalSold, marginPercent, medianPriceCents });
-        // Quality gate — only genuine high-potential products get through.
+        const score = computeSourcingScore({ totalSold: demand.totalSold, marginPercent, medianPriceCents, activeListingCount: demand.activeListingCount });
+        // Quality gate — only genuine high-potential products get through. Now
+        // competition-aware: a saturated niche (many active listings vs sales)
+        // scores lower via sell-through rate and is more likely filtered here.
         if (score < MIN_SCORE_TO_SURFACE) continue;
 
         winners.push({ keyword, key, avgPriceCents, medianPriceCents, totalSold: demand.totalSold, product, marginCents, marginPercent, score });

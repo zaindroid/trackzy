@@ -18,10 +18,15 @@ export class MockScraperEbayClient implements ScraperEbayClient {
       itemsSold: (base + i * 53) % 400,
     }));
     const prices = items.map((i) => i.priceCents).sort((a, b) => a - b);
+    const totalSold = items.reduce((s, i) => s + i.itemsSold, 0);
+    // Deterministic active-listing count: varied so STR spans goldmine↔bloodbath
+    // across keywords (some niches land far more saturated than others).
+    const activeListingCount = 20 + (base % 400);
     return {
       items,
-      totalSold: items.reduce((s, i) => s + i.itemsSold, 0),
+      totalSold,
       medianPriceCents: prices[Math.floor(prices.length / 2)] ?? 0,
+      activeListingCount,
     };
   }
 }
