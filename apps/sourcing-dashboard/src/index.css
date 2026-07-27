@@ -62,28 +62,3 @@
     }
   }
 }
-
-@layer components {
-  /* Responsive manifest table: a real <table> at md+, a stack of
-     label/value cards below md. Keeps table semantics (and every
-     getByRole('table') / getByText query) intact at every breakpoint. */
-  .manifest {
-    @apply w-full border-collapse text-left text-sm;
-  }
-  .manifest thead {
-    @apply hidden md:table-header-group;
-  }
-  .manifest tbody tr {
-    @apply block border-b border-rule px-4 py-3 md:table-row md:border-0 md:px-0 md:py-0;
-  }
-  .manifest tbody tr:last-child {
-    @apply border-b-0;
-  }
-  .manifest tbody td {
-    @apply flex items-center justify-between gap-4 border-0 py-1 text-right md:table-cell md:justify-start md:py-2.5 md:text-left;
-  }
-  .manifest tbody td::before {
-    content: attr(data-label);
-    @apply text-xs font-medium uppercase tracking-wide text-ink-faint md:hidden;
-  }
-}

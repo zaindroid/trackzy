@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthToken } from '../lib/auth.js';
 import { apiFetch, type ConnectionStatus, type ProductCandidate, type SourcingProvider } from '../lib/api.js';
-import { Button, EmptyState, PageHeader, Select, TextInput } from '../components/ui.js';
+import { Button, EmptyState, PageHeader, Select, TextInput, Textarea } from '../components/ui.js';
 
 function money(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
@@ -94,12 +94,7 @@ function ReviewModal({ candidate, onClose }: { candidate: ProductCandidate; onCl
           <TextInput value={price} inputMode="decimal" onChange={(e) => setPrice(e.target.value)} className="w-40" />
 
           <label className="mb-1 mt-3 block text-xs font-medium text-ink-muted">Description</label>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={5}
-            className="w-full border border-rule bg-paper p-2 text-sm text-ink outline-none focus:border-signal"
-          />
+          <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={5} className="w-full" />
 
           <div className="mt-3 rounded-lg bg-paper p-2.5 text-xs text-ink-muted">
             <div className="flex justify-between"><span>List price</span><span className="text-ink">{money(priceCents)}</span></div>

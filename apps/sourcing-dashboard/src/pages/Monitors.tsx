@@ -70,7 +70,7 @@ function MonitorCard({ m }: { m: ListingMonitor }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <p className="truncate font-medium text-ink">{m.title}</p>
-            <Badge tone={HEALTH_TONE[m.health]} className="shrink-0">{m.health}</Badge>
+            <Badge tone={HEALTH_TONE[m.health]} className="shrink-0 capitalize">{m.health}</Badge>
           </div>
           <p className="mt-0.5 text-xs text-ink-muted">
             price {money(m.currentSellPriceCents)} · cost {money(m.currentSupplierCostCents)} · margin{' '}

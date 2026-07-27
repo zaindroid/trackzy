@@ -11,7 +11,7 @@ function money(cents: number): string {
 function Thumb({ src, blurred, alt }: { src: string | null; blurred: boolean; alt: string }) {
   if (!src) return <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border border-rule bg-paper text-[9px] text-ink-faint">Locked</div>;
   return (
-    <div className="group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-rule">
+    <div className="group relative h-16 w-16 shrink-0 cursor-pointer overflow-hidden rounded-lg border border-rule" tabIndex={0}>
       {/* Full blur at rest so the product can't be identified or reverse-searched;
           softens to a light haze on hover/tap-hold as a "peek" — never a full reveal. */}
       <img
@@ -26,7 +26,7 @@ function Thumb({ src, blurred, alt }: { src: string | null; blurred: boolean; al
             src={src}
             alt=""
             aria-hidden
-            className="absolute inset-0 h-full w-full scale-[1.3] object-cover opacity-0 blur-[3px] transition-opacity duration-200 group-hover:opacity-100 group-active:opacity-100"
+            className="absolute inset-0 h-full w-full scale-[1.3] object-cover opacity-0 blur-[3px] transition-opacity duration-200 group-hover:opacity-100 group-active:opacity-100 group-focus-visible:opacity-100"
           />
           <span className="absolute bottom-1 left-1 rounded-md bg-ink px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-paper">Pro</span>
         </>

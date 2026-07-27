@@ -43,7 +43,7 @@ export function OrdersPage() {
       )}
 
       {orders.length > 0 && (
-        <div className="overflow-x-auto rounded-2xl border border-rule shadow-raised">
+        <div className="overflow-x-auto rounded-2xl border border-rule bg-paper-raised shadow-raised">
           <table className="w-full min-w-[560px] text-sm">
             <thead>
               <tr className="border-b border-rule bg-paper-raised text-left text-xs uppercase tracking-wide text-ink-muted">
@@ -59,7 +59,7 @@ export function OrdersPage() {
                 <tr key={o.id} className="border-b border-rule last:border-0">
                   <td className="p-2 font-medium text-ink">{o.externalOrderNumber}</td>
                   <td className="p-2">
-                    <Badge tone={STATUS_TONE[o.status] ?? 'neutral'}>{o.status}</Badge>
+                    <Badge tone={STATUS_TONE[o.status] ?? 'neutral'} className="capitalize">{o.status}</Badge>
                   </td>
                   <td className="p-2 text-right tabular-nums">{money(o.subtotalCents + o.shippingCents, o.currency)}</td>
                   <td className="p-2 text-right tabular-nums text-moss">{o.marginCents != null ? money(o.marginCents, o.currency) : '—'}</td>

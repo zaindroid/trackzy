@@ -107,7 +107,7 @@ export function Badge({
   children: ReactNode;
 }) {
   return (
-    <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium capitalize ${BADGE_TONES[tone]} ${className}`}>
+    <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${BADGE_TONES[tone]} ${className}`}>
       {children}
     </span>
   );

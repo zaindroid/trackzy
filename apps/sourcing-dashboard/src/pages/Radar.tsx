@@ -89,7 +89,7 @@ export function RadarPage() {
       )}
 
       {rows.length > 0 && (
-        <div className="overflow-x-auto rounded-2xl border border-rule shadow-raised">
+        <div className="overflow-x-auto rounded-2xl border border-rule bg-paper-raised shadow-raised">
           <table className="w-full min-w-[720px] border-collapse text-sm">
             <thead>
               <tr className="border-b border-rule bg-paper-raised text-left text-xs uppercase tracking-wide text-ink-muted">

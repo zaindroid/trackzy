@@ -11,6 +11,11 @@ function useAnimatedNumber(value: number): number {
   const [display, setDisplay] = useState(value);
   const displayRef = useRef(value);
   useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      displayRef.current = value;
+      setDisplay(value);
+      return;
+    }
     const from = displayRef.current;
     const to = value;
     if (from === to) return;
@@ -34,14 +39,15 @@ function useAnimatedNumber(value: number): number {
 function CreditsCard() {
   const { getToken } = useAuthToken();
   const { data } = useQuery({ queryKey: ['credits'], queryFn: () => apiFetch<CreditsResponse>('/credits', getToken) });
+  const hasData = data !== undefined;
   const balance = data?.balance ?? 0;
   const displayed = useAnimatedNumber(balance);
-  const low = displayed < LOW_BALANCE_THRESHOLD;
+  const low = hasData && displayed < LOW_BALANCE_THRESHOLD;
   return (
     <div className="animate-creditsEnter rounded-xl border border-rule bg-paper-raised p-3">
       <span className="inline-block rounded-md bg-signal px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-signal-ink">Credits</span>
-      <div className={`mt-1.5 font-display text-[28px] font-extrabold leading-none transition-colors duration-[220ms] ${low ? 'text-brick' : 'text-ink'}`}>
-        {displayed}
+      <div className={`mt-1.5 font-display text-[28px] font-bold leading-none transition-colors duration-[220ms] ${low ? 'text-brick' : 'text-ink'}`}>
+        {hasData ? displayed : '—'}
       </div>
       <div className="mt-1.5 flex justify-end">
         <NavLink to="/billing" className="text-xs font-semibold text-signal transition-transform active:scale-95">

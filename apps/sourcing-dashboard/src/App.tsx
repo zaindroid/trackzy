@@ -30,7 +30,7 @@ export default function App() {
         <Route path="/connections" element={<ConnectionsPage />} />
         <Route path="/billing" element={<BillingPage />} />
         <Route path="/settings" element={<SettingsPage />} />
-        <Route path="*" element={<Navigate to="/research" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>
   );
