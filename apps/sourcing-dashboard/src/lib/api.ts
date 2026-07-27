@@ -90,6 +90,19 @@ export interface LibraryWinner {
   unlocked: boolean;
 }
 
+export interface LeaderboardWinner {
+  id: string;
+  keyword: string;
+  productTitle: string;
+  imageUrl: string | null;
+  score: number;
+  ebaySoldCount: number;
+  marginCents: number;
+  marginPercent: number;
+  timesUnlocked: number;
+  isNew: boolean;
+}
+
 export class ApiError extends Error {
   constructor(
     public code: string,

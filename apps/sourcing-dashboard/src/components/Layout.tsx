@@ -20,6 +20,7 @@ const NAV_ITEMS = [
   { to: '/research', label: 'Research' },
   { to: '/radar', label: 'Radar' },
   { to: '/library', label: 'Library' },
+  { to: '/leaderboard', label: 'Leaderboard' },
   { to: '/connections', label: 'Connections' },
   { to: '/billing', label: 'Billing' },
   { to: '/settings', label: 'Settings' },

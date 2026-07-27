@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import { createDb, creditAccounts, productCandidates, sellerSettings, winners, winnerUnlocks } from '@sourcing/db';
 import { computeListingMargin, computeSourcingScore } from '@fulfillment-tracker/core';
 import { createScraperEbayClient } from '@fulfillment-tracker/adapters/scraperEbay';
@@ -14,6 +14,14 @@ import { WINNER_FRESH_MS } from '../../lib/winners.js';
 const app = new Hono<{ Bindings: Env; Variables: AuthedVariables }>();
 
 const MIN_SCORE_TO_SURFACE = 70;
+// Pro subscribers unlock this many library winners free PER DAY; beyond that they
+// spend credits like everyone else. Keeps the hidden library scarce/valuable
+// while still feeling generous.
+const DAILY_PRO_FREE_UNLOCKS = 25;
+
+function startOfUtcDay(ms: number): number {
+  return Math.floor(ms / 86_400_000) * 86_400_000;
+}
 
 /**
  * The winners library — a browsable catalog of vetted products (teasers). The
@@ -40,6 +48,33 @@ app.get('/', async (c) => {
       marginPercent: w.marginPercent,
       score: w.score,
       unlocked: unlocked.has(w.id),
+    })),
+  });
+});
+
+/**
+ * Leaderboard data for the engagement view — top winners with every ranking
+ * metric so the client can sort/animate across Opportunity / Demand / Margin /
+ * Trending. `trending` (unlock popularity) and freshness re-scoring make it move
+ * over time; the client polls to keep it feeling live. Teaser fields only (no
+ * supplier link) — unlocking still happens on the Library tab.
+ */
+app.get('/leaderboard', async (c) => {
+  const db = createDb(c.env.SOURCING_DB);
+  const rows = await db.select().from(winners).where(eq(winners.reserved, 0)).orderBy(desc(winners.score)).limit(50);
+  const weekAgo = now() - 7 * 86_400_000;
+  return c.json({
+    winners: rows.map((w) => ({
+      id: w.id,
+      keyword: w.keyword,
+      productTitle: w.productTitle,
+      imageUrl: (JSON.parse(w.imageUrlsJson) as string[])[0] ?? null,
+      score: w.score,
+      ebaySoldCount: w.ebaySoldCount,
+      marginCents: w.marginCents,
+      marginPercent: w.marginPercent,
+      timesUnlocked: w.timesUnlocked,
+      isNew: w.createdAt >= weekAgo,
     })),
   });
 });
@@ -87,15 +122,29 @@ app.post('/:id/unlock', async (c) => {
     }
   }
 
-  // Charge unless already unlocked or an active Pro subscriber (free unlocks).
+  // Charging: Pro subscribers get DAILY_PRO_FREE_UNLOCKS free per day; beyond
+  // that (or without Pro) each unlock costs a credit.
   if (!already) {
     const [acct] = await db.select().from(creditAccounts).where(eq(creditAccounts.userId, userId));
     const proActive = acct?.plan === 'pro' && acct?.subscriptionStatus === 'active';
-    if (!proActive) {
+    let freeUnlock = false;
+    if (proActive) {
+      const [{ count } = { count: 0 }] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(winnerUnlocks)
+        .where(and(eq(winnerUnlocks.userId, userId), gte(winnerUnlocks.createdAt, startOfUtcDay(now()))));
+      freeUnlock = Number(count) < DAILY_PRO_FREE_UNLOCKS;
+    }
+    if (!freeUnlock) {
       try {
         await spendCredits(db, userId, CREDIT_COSTS.unlock, 'unlock', winner.id);
       } catch (err) {
-        if (err instanceof InsufficientCreditsError) return errorResponse(c, 'INSUFFICIENT_CREDITS', 'Not enough credits to unlock — top up or go Pro.', 402);
+        if (err instanceof InsufficientCreditsError) {
+          const msg = proActive
+            ? `You've used your ${DAILY_PRO_FREE_UNLOCKS} free Pro unlocks today — top up credits for more.`
+            : 'Not enough credits to unlock — top up or go Pro.';
+          return errorResponse(c, 'INSUFFICIENT_CREDITS', msg, 402);
+        }
         throw err;
       }
     }
