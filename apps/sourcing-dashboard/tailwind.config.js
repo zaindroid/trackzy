@@ -30,7 +30,16 @@ export default {
         mono: ['"IBM Plex Mono"', 'ui-monospace', 'monospace'],
       },
       boxShadow: {
-        raised: '0 1px 2px rgb(0 0 0 / 0.04), 0 1px 1px rgb(0 0 0 / 0.03)',
+        raised: '0 1px 3px rgb(0 0 0 / 0.04)',
+      },
+      keyframes: {
+        creditsEnter: {
+          from: { opacity: '0', transform: 'translateY(4px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+      },
+      animation: {
+        creditsEnter: 'creditsEnter 180ms cubic-bezier(0.23,1,0.32,1)',
       },
     },
   },
