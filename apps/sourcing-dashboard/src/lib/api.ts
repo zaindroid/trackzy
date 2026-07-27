@@ -97,7 +97,6 @@ export interface LibraryResponse {
 
 export interface LeaderboardWinner {
   id: string;
-  keyword: string;
   productTitle: string;
   imageUrl: string | null;
   score: number;

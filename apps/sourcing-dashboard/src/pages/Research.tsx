@@ -8,6 +8,18 @@ function money(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
 }
 
+/** Big, color-coded opportunity score — the eye-catching headline of each card. */
+function ScoreBadge({ score }: { score: number }) {
+  const s = Math.round(score);
+  const tone = s >= 85 ? 'bg-moss text-paper' : s >= 70 ? 'bg-signal text-paper' : 'bg-ochre text-paper';
+  return (
+    <div className={`flex shrink-0 flex-col items-center justify-center rounded-md ${tone} px-3 py-1.5 shadow-raised`}>
+      <span className="font-display text-2xl font-bold leading-none tabular-nums">{s}</span>
+      <span className="text-[9px] font-semibold uppercase tracking-wider opacity-80">score</span>
+    </div>
+  );
+}
+
 function Thumb({ src, alt, px = 64 }: { src?: string; alt: string; px?: number }) {
   const style = { width: px, height: px };
   if (!src)
@@ -131,19 +143,16 @@ function CandidateCard({ candidate }: { candidate: ProductCandidate }) {
       <div className="flex gap-3">
         <Thumb src={candidate.supplierImageUrls[0]} alt={candidate.generatedTitle} />
         <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-2">
-            <p className="font-medium text-ink">{candidate.generatedTitle}</p>
-            <span
-              className={`shrink-0 rounded-sm px-2 py-0.5 text-xs font-semibold ${
-                candidate.marginCents > 0 ? 'bg-moss/15 text-moss' : 'bg-brick/15 text-brick'
-              }`}
-            >
-              {money(candidate.marginCents)} profit
-            </span>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-medium text-ink">{candidate.generatedTitle}</p>
+              <p className="mt-0.5 text-xs text-ink-muted">
+                {candidate.ebaySoldCount.toLocaleString()} sold · median {money(candidate.ebayMedianPriceCents)} ·{' '}
+                <span className={candidate.marginCents > 0 ? 'text-moss' : 'text-brick'}>{money(candidate.marginCents)} profit</span>
+              </p>
+            </div>
+            <ScoreBadge score={candidate.opportunityScore} />
           </div>
-          <p className="mt-0.5 text-xs text-ink-muted">
-            eBay sold: {candidate.ebaySoldCount} · median {money(candidate.ebayMedianPriceCents)} · opportunity {candidate.opportunityScore}/100
-          </p>
 
           <div className="mt-2 rounded-sm bg-paper p-2 text-xs text-ink-muted">
             <div className="flex justify-between">

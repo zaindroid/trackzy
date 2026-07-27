@@ -100,6 +100,7 @@ app.get('/leaderboard', async (c) => {
       // Redacted — the leaderboard is the public hook: show the numbers and a
       // teaser, not the identifiable product (that's unlocked in Golden Products).
       productTitle: redactTitle(w.productTitle),
+      imageUrl: (JSON.parse(w.imageUrlsJson) as string[])[0] ?? null, // client blurs it
       score: w.score,
       ebaySoldCount: w.ebaySoldCount,
       marginCents: w.marginCents,
