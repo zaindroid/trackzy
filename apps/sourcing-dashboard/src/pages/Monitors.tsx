@@ -2,17 +2,17 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthToken } from '../lib/auth.js';
 import { apiFetch, type ListingMonitor } from '../lib/api.js';
-import { Button, EmptyState, PageHeader, TextInput } from '../components/ui.js';
+import { Badge, Button, EmptyState, PageHeader, TextInput } from '../components/ui.js';
 
 function money(cents: number | null): string {
   return cents == null ? '—' : `$${(cents / 100).toFixed(2)}`;
 }
 
-const HEALTH_TONE: Record<ListingMonitor['health'], string> = {
-  healthy: 'bg-moss/15 text-moss',
-  warning: 'bg-ochre/20 text-ochre',
-  critical: 'bg-brick/15 text-brick',
-  paused: 'bg-paper text-ink-faint',
+const HEALTH_TONE: Record<ListingMonitor['health'], 'moss' | 'ochre' | 'brick' | 'neutral'> = {
+  healthy: 'moss',
+  warning: 'ochre',
+  critical: 'brick',
+  paused: 'neutral',
 };
 
 /** Tiny inline margin-trend sparkline, colored by direction. */
@@ -64,13 +64,13 @@ function MonitorCard({ m }: { m: ListingMonitor }) {
   };
 
   return (
-    <div className="border border-rule bg-paper-raised p-4 shadow-raised">
+    <div className="rounded-2xl border border-rule bg-paper-raised p-4 shadow-raised">
       <div className="flex gap-3">
-        {m.imageUrl && <img src={m.imageUrl} alt={m.title} className="h-14 w-14 shrink-0 border border-rule object-cover" />}
+        {m.imageUrl && <img src={m.imageUrl} alt={m.title} className="h-14 w-14 shrink-0 rounded-lg border border-rule object-cover" />}
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <p className="truncate font-medium text-ink">{m.title}</p>
-            <span className={`shrink-0 rounded-sm px-2 py-0.5 text-xs font-semibold capitalize ${HEALTH_TONE[m.health]}`}>{m.health}</span>
+            <Badge tone={HEALTH_TONE[m.health]} className="shrink-0">{m.health}</Badge>
           </div>
           <p className="mt-0.5 text-xs text-ink-muted">
             price {money(m.currentSellPriceCents)} · cost {money(m.currentSupplierCostCents)} · margin{' '}
@@ -82,14 +82,14 @@ function MonitorCard({ m }: { m: ListingMonitor }) {
           {m.lastReason && <p className="mt-1 text-xs italic text-ink-faint">{m.lastReason}</p>}
 
           {m.pendingSwitch && (
-            <div className="mt-3 border border-ochre/40 bg-ochre/5 p-3">
+            <div className="mt-3 rounded-xl border border-ochre/40 bg-ochre/5 p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-ochre">Out of stock — approve a replacement supplier?</p>
               <p className="mt-1 text-xs text-ink-muted">
                 We paused this listing and found a possible replacement. Approve only if it's the <span className="font-medium text-ink">same product</span> — we never switch suppliers automatically.
               </p>
               <div className="mt-2 flex gap-3">
                 {m.pendingSwitch.imageUrl && (
-                  <img src={m.pendingSwitch.imageUrl} alt={m.pendingSwitch.title ?? 'candidate'} className="h-16 w-16 shrink-0 border border-rule object-cover" />
+                  <img src={m.pendingSwitch.imageUrl} alt={m.pendingSwitch.title ?? 'candidate'} className="h-16 w-16 shrink-0 rounded-lg border border-rule object-cover" />
                 )}
                 <div className="min-w-0 flex-1">
                   <p className="line-clamp-2 text-xs text-ink">{m.pendingSwitch.title ?? 'Replacement candidate'}</p>
