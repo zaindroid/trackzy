@@ -8,6 +8,7 @@
     "test": "vitest run",
     "dev": "wrangler dev --config ../../wrangler.sourcing.toml",
     "build": "wrangler deploy --dry-run --outdir dist --config ../../wrangler.sourcing.toml",
+    "deploy": "wrangler deploy --config ../../wrangler.sourcing.toml",
     "migrate:local": "wrangler d1 migrations apply SOURCING_DB --local --config ../../wrangler.sourcing.toml",
     "migrate:prod": "wrangler d1 migrations apply SOURCING_DB --remote --config ../../wrangler.sourcing.toml"
   },
