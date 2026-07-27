@@ -54,6 +54,17 @@ export interface Env {
   // must present to POST results to /ingest/radar. Set via `wrangler secret put`.
   RADAR_INGEST_TOKEN?: string;
 
+  // Lemon Squeezy (merchant-of-record) billing. API key + store id create
+  // checkouts; the webhook secret verifies inbound events. Variant ids come
+  // from the LS dashboard once products exist (billing stays disabled until set).
+  LEMONSQUEEZY_API_KEY?: string;
+  LEMONSQUEEZY_STORE_ID?: string;
+  LEMONSQUEEZY_WEBHOOK_SECRET?: string;
+  LS_VARIANT_CREDITS_50?: string;
+  LS_VARIANT_CREDITS_200?: string;
+  LS_VARIANT_CREDITS_600?: string;
+  LS_VARIANT_SUB_PRO?: string;
+
   // The trackzy linkage: base URL of the trackzy worker, called best-effort
   // after a listing publishes so trackzy can fulfill it with a deterministic
   // supplier match. Optional — fulfillment degrades to trackzy's own matching.

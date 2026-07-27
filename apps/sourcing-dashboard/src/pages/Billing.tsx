@@ -1,7 +1,12 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useAuthToken } from '../lib/auth.js';
 import { apiFetch, type CreditsResponse } from '../lib/api.js';
-import { EmptyState, PageHeader, Panel } from '../components/ui.js';
+import { Button, EmptyState, PageHeader, Panel } from '../components/ui.js';
+
+interface OfferingsResponse {
+  configured: boolean;
+  offerings: { id: string; label: string; price: string; kind: 'credits' | 'subscription'; credits?: number; plan?: string }[];
+}
 
 function reasonLabel(reason: string): string {
   const map: Record<string, string> = {
@@ -17,19 +22,21 @@ function reasonLabel(reason: string): string {
   return map[reason] ?? reason;
 }
 
-// Placeholder credit packs — real checkout wires to Lemon Squeezy once the
-// account is set up (see the monetization plan). For now "Buy" is disabled.
-const PACKS = [
-  { credits: 50, price: '$9' },
-  { credits: 200, price: '$29' },
-  { credits: 600, price: '$69' },
-];
-
 export function BillingPage() {
   const { getToken } = useAuthToken();
   const query = useQuery({ queryKey: ['credits'], queryFn: () => apiFetch<CreditsResponse>('/credits', getToken) });
+  const offeringsQuery = useQuery({ queryKey: ['offerings'], queryFn: () => apiFetch<OfferingsResponse>('/billing/offerings', getToken) });
   const balance = query.data?.balance ?? 0;
   const ledger = query.data?.ledger ?? [];
+  const configured = offeringsQuery.data?.configured ?? false;
+  const offerings = offeringsQuery.data?.offerings ?? [];
+
+  const checkout = useMutation({
+    mutationFn: (offeringId: string) => apiFetch<{ url: string }>('/billing/checkout', getToken, { method: 'POST', body: JSON.stringify({ offeringId }) }),
+    onSuccess: (data) => {
+      window.location.href = data.url; // to Lemon Squeezy hosted checkout
+    },
+  });
 
   return (
     <div className="max-w-3xl">
@@ -42,20 +49,25 @@ export function BillingPage() {
         </div>
       </Panel>
 
-      <Panel title="Buy more credits" className="mb-4">
-        <div className="grid gap-3 sm:grid-cols-3">
-          {PACKS.map((p) => (
-            <div key={p.credits} className="flex flex-col items-center gap-1 border border-rule p-4">
-              <span className="font-display text-2xl font-semibold text-ink">{p.credits}</span>
-              <span className="text-xs text-ink-muted">credits</span>
-              <span className="mt-1 text-sm text-ink">{p.price}</span>
-              <button type="button" disabled className="mt-2 cursor-not-allowed rounded-sm bg-paper px-3 py-1 text-xs text-ink-faint" title="Checkout coming soon">
-                Coming soon
-              </button>
+      <Panel title="Buy credits & plans" className="mb-4">
+        <div className="grid gap-3 sm:grid-cols-2">
+          {offerings.map((o) => (
+            <div key={o.id} className="flex flex-col items-start gap-1 border border-rule p-4">
+              <span className="font-medium text-ink">{o.label}</span>
+              <span className="text-sm text-ink-muted">{o.price}</span>
+              <Button
+                variant="primary"
+                className="mt-2"
+                onClick={() => checkout.mutate(o.id)}
+                disabled={!configured || checkout.isPending}
+              >
+                {checkout.isPending && checkout.variables === o.id ? 'Starting…' : configured ? 'Buy' : 'Coming soon'}
+              </Button>
             </div>
           ))}
         </div>
-        <p className="mt-3 text-xs text-ink-faint">Secure checkout is being set up. You start with trial credits to explore everything.</p>
+        {!configured && <p className="mt-3 text-xs text-ink-faint">Secure checkout is being set up. You start with trial credits to explore everything.</p>}
+        {checkout.isError && <p className="mt-2 text-sm text-brick">{(checkout.error as Error).message}</p>}
       </Panel>
 
       <Panel title="Usage history">

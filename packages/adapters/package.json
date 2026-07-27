@@ -22,6 +22,7 @@
     "./apifyAliexpress": "./src/apifyAliexpress/index.ts",
     "./scraperEbay": "./src/scraperEbay/index.ts",
     "./aliexpressDs": "./src/aliexpressDs/index.ts",
+    "./lemonSqueezy": "./src/lemonSqueezy/index.ts",
     "./amazon": "./src/amazon/index.ts",
     "./supplierApi": "./src/supplierApi/index.ts",
     "./gmail": "./src/gmail/index.ts",

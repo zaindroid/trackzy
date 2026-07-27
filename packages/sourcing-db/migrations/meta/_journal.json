@@ -43,6 +43,13 @@
       "when": 1785112076378,
       "tag": "0005_famous_omega_red",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1785113443245,
+      "tag": "0006_colossal_franklin_storm",
+      "breakpoints": true
     }
   ]
 }

@@ -25,6 +25,7 @@ export default defineWorkersConfig(async () => {
               EBAY_RUNAME: 'PLACEHOLDER__EBAY_RUNAME',
               EBAY_DELETION_VERIFICATION_TOKEN: 'test-verification-token-0123456789',
               RADAR_INGEST_TOKEN: 'test-radar-ingest-token-0123456789',
+              LEMONSQUEEZY_WEBHOOK_SECRET: 'test-ls-webhook-secret',
               GEMINI_API_KEY: 'PLACEHOLDER__GEMINI_API_KEY',
               GROQ_API_KEY: 'PLACEHOLDER__GROQ_API_KEY',
               APIFY_TOKEN: 'PLACEHOLDER__APIFY_TOKEN',

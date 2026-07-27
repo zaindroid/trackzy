@@ -76,6 +76,12 @@ export const creditAccounts = sqliteTable('credit_accounts', {
     .references(() => users.id),
   balance: integer('balance').notNull().default(0),
   trialGrantedAt: integer('trial_granted_at'),
+  // Subscription state, driven by Lemon Squeezy webhooks. `plan` is null for
+  // free users; `subscriptionStatus` mirrors LS (active/cancelled/expired/…).
+  plan: text('plan'),
+  subscriptionStatus: text('subscription_status'),
+  subscriptionId: text('subscription_id'),
+  subscriptionRenewsAt: integer('subscription_renews_at'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 });
