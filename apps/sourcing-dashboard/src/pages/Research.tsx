@@ -24,11 +24,11 @@ function Thumb({ src, alt, px = 64 }: { src?: string; alt: string; px?: number }
   const style = { width: px, height: px };
   if (!src)
     return (
-      <div style={style} className="flex shrink-0 items-center justify-center border border-rule bg-paper text-[9px] text-ink-faint">
+      <div style={style} className="flex shrink-0 items-center justify-center rounded-lg border border-rule bg-paper text-[9px] text-ink-faint">
         No image
       </div>
     );
-  return <img src={src} alt={alt} style={style} className="shrink-0 border border-rule object-cover" />;
+  return <img src={src} alt={alt} style={style} className="shrink-0 rounded-lg border border-rule object-cover" />;
 }
 
 const EBAY_FEE_RATE = 0.1325;
@@ -68,10 +68,14 @@ function ReviewModal({ candidate, onClose }: { candidate: ProductCandidate; onCl
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink/60 p-4 sm:p-8" onClick={onClose}>
-      <div className="w-full max-w-2xl border border-rule bg-paper-raised shadow-raised" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-2xl overflow-hidden rounded-2xl border border-rule bg-paper-raised shadow-raised" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-rule px-4 py-3">
           <h2 className="font-semibold text-ink">Review before publishing to eBay</h2>
-          <button type="button" className="text-ink-muted hover:text-ink" onClick={onClose} aria-label="Close">✕</button>
+          <button type="button" className="text-ink-muted transition-colors hover:text-ink" onClick={onClose} aria-label="Close">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
         </div>
 
         <div className="max-h-[70vh] overflow-y-auto p-4">
@@ -97,7 +101,7 @@ function ReviewModal({ candidate, onClose }: { candidate: ProductCandidate; onCl
             className="w-full border border-rule bg-paper p-2 text-sm text-ink outline-none focus:border-signal"
           />
 
-          <div className="mt-3 rounded-sm bg-paper p-2 text-xs text-ink-muted">
+          <div className="mt-3 rounded-lg bg-paper p-2.5 text-xs text-ink-muted">
             <div className="flex justify-between"><span>List price</span><span className="text-ink">{money(priceCents)}</span></div>
             <div className="flex justify-between"><span>Supplier cost</span><span>−{money(candidate.supplierCostCents)}</span></div>
             <div className="flex justify-between"><span>eBay fee (~13.25%)</span><span>−{money(feeCents)}</span></div>
@@ -139,7 +143,7 @@ function CandidateCard({ candidate }: { candidate: ProductCandidate }) {
   const feeCents = Math.round(candidate.suggestedSellPriceCents * EBAY_FEE_RATE);
 
   return (
-    <div className="border border-rule bg-paper-raised p-4 shadow-raised">
+    <div className="rounded-2xl border border-rule bg-paper-raised p-4 shadow-raised">
       <div className="flex gap-3">
         <Thumb src={candidate.supplierImageUrls[0]} alt={candidate.generatedTitle} />
         <div className="min-w-0 flex-1">
@@ -154,7 +158,7 @@ function CandidateCard({ candidate }: { candidate: ProductCandidate }) {
             <ScoreBadge score={candidate.opportunityScore} />
           </div>
 
-          <div className="mt-2 rounded-sm bg-paper p-2 text-xs text-ink-muted">
+          <div className="mt-2 rounded-lg bg-paper p-2.5 text-xs text-ink-muted">
             <div className="flex justify-between">
               <span>List price</span>
               <span className="text-ink">{money(candidate.suggestedSellPriceCents)}</span>
@@ -258,7 +262,7 @@ export function ResearchPage() {
         description="Enter a niche. The bot finds what's really selling on eBay, sources it from your supplier, computes the margin, and writes the listing — you just approve."
       />
 
-      <div className="mb-6 border border-rule bg-paper-raised p-4 shadow-raised">
+      <div className="mb-6 rounded-2xl border border-rule bg-paper-raised p-4 shadow-raised">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <TextInput value={seed} onChange={(e) => setSeed(e.target.value)} placeholder="e.g. silk eye mask" className="sm:w-64" />
           <Select value={supplier} onChange={(e) => setSupplier(e.target.value as SourcingProvider)} className="sm:w-44">
@@ -342,7 +346,7 @@ function ResearchProgress({ seed }: { seed: string }) {
     return () => clearInterval(t);
   }, [stages.length]);
   return (
-    <div className="mt-3 flex items-center gap-3 rounded-sm bg-paper p-3">
+    <div className="mt-3 flex items-center gap-3 rounded-xl bg-paper p-3">
       <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-rule border-t-signal" />
       <div className="min-w-0">
         <p className="truncate text-sm text-ink">{stages[i]}</p>
