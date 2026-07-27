@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthToken } from '../lib/auth.js';
 import { apiFetch, type LeaderboardWinner } from '../lib/api.js';
-import { EmptyState, PageHeader } from '../components/ui.js';
+import { Badge, EmptyState, PageHeader } from '../components/ui.js';
 
 type Metric = 'score' | 'ebaySoldCount' | 'marginCents' | 'timesUnlocked';
 
@@ -77,18 +77,24 @@ export function LeaderboardPage() {
         {ranked.map((w, i) => {
           const value = w[metric] as number;
           const pct = Math.max(4, Math.round((value / max) * 100));
-          const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : null;
+          const topThree = i < 3;
           return (
-            <div key={w.id} className="flex items-center gap-3 rounded-md border border-rule bg-paper-raised p-2.5">
-              <span className="w-7 shrink-0 text-center font-display text-lg font-bold tabular-nums text-ink-faint">{medal ?? i + 1}</span>
+            <div key={w.id} className="flex items-center gap-3 rounded-xl border border-rule bg-paper-raised p-2.5">
+              <span
+                className={`flex w-7 shrink-0 items-center justify-center rounded-md text-center font-display text-sm font-bold tabular-nums ${
+                  topThree ? `${RANK_COLORS[i]} text-paper` : 'text-ink-faint'
+                }`}
+              >
+                {i + 1}
+              </span>
               {/* Blurred teaser thumbnail — identity hidden; unlock in Golden Products. */}
-              <div className="h-12 w-12 shrink-0 overflow-hidden rounded border border-rule bg-paper">
+              <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-rule bg-paper">
                 {w.imageUrl && <img src={w.imageUrl} alt="" className="h-full w-full object-cover" style={{ filter: 'blur(8px)', transform: 'scale(1.3)' }} />}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="truncate text-sm text-ink-muted">{w.productTitle}</span>
-                  {w.isNew && <span className="shrink-0 rounded-sm bg-moss/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-moss">New</span>}
+                  {w.isNew && <Badge tone="moss" className="shrink-0 text-[10px]">New</Badge>}
                 </div>
                 <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-paper">
                   <div className={`h-full rounded-full ${RANK_COLORS[i] ?? 'bg-rule'} transition-all duration-700`} style={{ width: `${pct}%` }} />
