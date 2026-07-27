@@ -49,9 +49,13 @@ function median(values: number[]): number {
  * (empty sold data, no supplier match, a flaky API) is skipped, never fatal
  * to the whole run.
  */
-export async function runResearch(env: Env, db: Database, userId: string, seed: string, provider: SourcingProvider): Promise<string> {
-  const runId = newId();
-  await db.insert(researchRuns).values({ id: runId, userId, seed, status: 'running', createdAt: now() });
+export async function runResearch(env: Env, db: Database, userId: string, seed: string, provider: SourcingProvider, existingRunId?: string): Promise<string> {
+  // The run row may be pre-created by the caller (async path, so the request can
+  // return the id immediately); otherwise create it here (sync/tests).
+  const runId = existingRunId ?? newId();
+  if (!existingRunId) {
+    await db.insert(researchRuns).values({ id: runId, userId, seed, status: 'running', createdAt: now() });
+  }
 
   try {
     const [settings] = await db.select().from(sellerSettings).where(eq(sellerSettings.userId, userId));

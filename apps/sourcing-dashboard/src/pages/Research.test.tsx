@@ -75,7 +75,10 @@ describe('ResearchPage', () => {
         return new Response(JSON.stringify({ ebayConnected: false, cjConnected: false, aliexpressAvailable: true }), { status: 200 });
       }
       if (init?.method === 'POST' && url.includes('/api/product-research/research')) {
-        return new Response(JSON.stringify({ candidates: [] }), { status: 200 });
+        return new Response(JSON.stringify({ runId: 'run1', status: 'running' }), { status: 202 });
+      }
+      if (url.includes('/api/product-research/runs/run1')) {
+        return new Response(JSON.stringify({ run: { status: 'done' } }), { status: 200 });
       }
       if (url.includes('/api/product-research')) {
         return new Response(JSON.stringify({ candidates: [] }), { status: 200 });

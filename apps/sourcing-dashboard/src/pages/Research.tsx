@@ -219,8 +219,20 @@ export function ResearchPage() {
     queryFn: () => apiFetch<{ candidates: ProductCandidate[] }>('/product-research', getToken),
   });
 
+  // Research is async: POST kicks off a background run and returns a runId; we
+  // poll the run until it finishes (progress animation shows throughout), then
+  // refresh the candidates. Keeps the request from hanging for the whole crawl.
   const research = useMutation({
-    mutationFn: () => apiFetch<{ candidates: ProductCandidate[] }>('/product-research/research', getToken, { method: 'POST', body: JSON.stringify({ seed, supplier }) }),
+    mutationFn: async () => {
+      const { runId } = await apiFetch<{ runId: string }>('/product-research/research', getToken, { method: 'POST', body: JSON.stringify({ seed, supplier }) });
+      for (let i = 0; i < 60; i++) {
+        await new Promise((r) => setTimeout(r, 2500));
+        const { run } = await apiFetch<{ run: { status: string; error?: string } }>(`/product-research/runs/${runId}`, getToken);
+        if (run.status === 'done') return;
+        if (run.status === 'failed') throw new Error(run.error || 'Research failed');
+      }
+      throw new Error('Research is taking longer than usual — your results will appear shortly.');
+    },
     onSuccess: () => {
       setSeed('');
       queryClient.invalidateQueries({ queryKey: ['candidates'] });

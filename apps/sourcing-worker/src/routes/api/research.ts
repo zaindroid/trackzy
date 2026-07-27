@@ -6,6 +6,7 @@ import type { Env } from '../../env.js';
 import type { AuthedVariables } from '../../middleware/auth.js';
 import { errorResponse } from '../../lib/errors.js';
 import { runResearch } from '../../research/pipeline.js';
+import { newId, now } from '../../lib/id.js';
 import { CREDIT_COSTS, InsufficientCreditsError, addCredits, spendCredits } from '../../lib/credits.js';
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVariables }>();
@@ -31,8 +32,9 @@ app.post('/research', async (c) => {
 
   const db = createDb(c.env.SOURCING_DB);
   const userId = c.get('userId');
+  const { seed, supplier } = parsed.data;
 
-  // Charge a credit up front; refund it if the run fails so a failure is free.
+  // Charge a credit up front; refunded if the run fails so a failure is free.
   try {
     await spendCredits(db, userId, CREDIT_COSTS.research, 'research');
   } catch (err) {
@@ -42,26 +44,26 @@ app.post('/research', async (c) => {
     throw err;
   }
 
-  let runId: string;
-  try {
-    runId = await runResearch(c.env, db, userId, parsed.data.seed, parsed.data.supplier);
-  } catch (err) {
-    await addCredits(db, userId, CREDIT_COSTS.research, 'refund', 'research-failed').catch(() => {});
-    const raw = err instanceof Error ? err.message : 'Research failed';
-    // Surface Apify quota exhaustion as a plain-language message rather than the
-    // raw actor error — it's an account/billing condition, not a bug.
-    const message = /usage hard limit|platform-feature-disabled|monthly usage/i.test(raw)
-      ? 'AliExpress sourcing is temporarily unavailable: the Apify scraping quota for this account has been reached. Add credits to the Apify plan, or try again after it resets.'
-      : raw;
-    return errorResponse(c, 'RESEARCH_FAILED', message, 502);
-  }
+  // ASYNC: create the run row now, return its id immediately, and process in the
+  // background (waitUntil) so the request isn't held for the 30-90s of a deep
+  // search. The client polls GET /runs/:id, then refetches candidates. This
+  // decouples the browser from the long crawl and keeps the portal responsive
+  // under concurrent load.
+  const runId = newId();
+  await db.insert(researchRuns).values({ id: runId, userId, seed, status: 'running', createdAt: now() });
 
-  const rows = await db
-    .select()
-    .from(productCandidates)
-    .where(and(eq(productCandidates.userId, userId), eq(productCandidates.runId, runId)))
-    .orderBy(desc(productCandidates.marginCents));
-  return c.json({ runId, candidates: withParsedJson(rows) });
+  const job = (async () => {
+    try {
+      await runResearch(c.env, db, userId, seed, supplier, runId);
+    } catch (err) {
+      // runResearch already marks the run 'failed'; refund the credit here.
+      await addCredits(db, userId, CREDIT_COSTS.research, 'refund', 'research-failed').catch(() => {});
+      console.error(`[research] run ${runId} failed:`, err);
+    }
+  })();
+  c.executionCtx.waitUntil(job);
+
+  return c.json({ runId, status: 'running' }, 202);
 });
 
 app.get('/', async (c) => {

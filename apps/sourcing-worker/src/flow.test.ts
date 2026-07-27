@@ -76,57 +76,64 @@ async function connectCj() {
   vi.unstubAllGlobals();
 }
 
-describe('research pipeline (mock adapters)', () => {
-  interface Candidate {
-    keyword: string;
-    supplierProvider: string;
-    supplierCostCents: number;
-    suggestedSellPriceCents: number;
-    marginCents: number;
-    generatedTitle: string;
-    supplierImageUrls: string[];
-    status: string;
-  }
+interface Candidate {
+  runId: string | null;
+  keyword: string;
+  supplierProvider: string;
+  supplierCostCents: number;
+  suggestedSellPriceCents: number;
+  marginCents: number;
+  generatedTitle: string;
+  supplierImageUrls: string[];
+  status: string;
+}
 
-  it('defaults to AliExpress (no connection needed) and produces ranked, list-ready candidates with real margin math', async () => {
-    const res = await SELF.fetch('https://s.example.com/api/product-research/research', {
-      method: 'POST',
-      headers: AUTH,
-      body: JSON.stringify({ seed: 'silk eye mask' }),
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { runId: string; candidates: Candidate[] };
-    expect(body.candidates.length).toBeGreaterThan(0);
-    const c0 = body.candidates[0]!;
+/** Kicks off an async research run and polls until it finishes, returning the
+ * final run + that run's candidates (newest research is async now). */
+async function researchAndWait(body: object): Promise<{ status: string; error?: string; candidates: Candidate[] }> {
+  const res = await SELF.fetch('https://s.example.com/api/product-research/research', { method: 'POST', headers: AUTH, body: JSON.stringify(body) });
+  if (res.status !== 202) {
+    const err = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+    return { status: `http_${res.status}`, error: err.error?.message, candidates: [] };
+  }
+  const { runId } = (await res.json()) as { runId: string };
+  let run: { status: string; error?: string } = { status: 'running' };
+  for (let i = 0; i < 60 && run.status === 'running'; i++) {
+    const r = await SELF.fetch(`https://s.example.com/api/product-research/runs/${runId}`, { headers: AUTH });
+    run = ((await r.json()) as { run: { status: string; error?: string } }).run;
+    if (run.status !== 'running') break;
+    await new Promise((res) => setTimeout(res, 25));
+  }
+  const listRes = await SELF.fetch('https://s.example.com/api/product-research', { headers: AUTH });
+  const all = ((await listRes.json()) as { candidates: Candidate[] }).candidates;
+  return { status: run.status, error: run.error, candidates: all.filter((c) => c.runId === runId) };
+}
+
+describe('research pipeline (mock adapters)', () => {
+  it('defaults to AliExpress (no connection needed) and produces list-ready candidates with real margin math', async () => {
+    const { status, candidates } = await researchAndWait({ seed: 'silk eye mask' });
+    expect(status).toBe('done');
+    expect(candidates.length).toBeGreaterThan(0);
+    const c0 = candidates[0]!;
     expect(c0.supplierProvider).toBe('aliexpress');
     expect(c0.suggestedSellPriceCents).toBeGreaterThan(0);
     expect(c0.supplierCostCents).toBeGreaterThan(0);
     expect(c0.generatedTitle).toBeTruthy();
     expect(c0.status).toBe('draft');
-    for (let i = 1; i < body.candidates.length; i++) {
-      expect(body.candidates[i - 1]!.marginCents).toBeGreaterThanOrEqual(body.candidates[i]!.marginCents);
-    }
+    for (const c of candidates) expect(c.marginCents).toBeGreaterThan(0); // gate keeps only profitable
   });
 
   it('sources from CJ when explicitly chosen and connected', async () => {
     await connectCj();
-    const res = await SELF.fetch('https://s.example.com/api/product-research/research', {
-      method: 'POST',
-      headers: AUTH,
-      body: JSON.stringify({ seed: 'silk eye mask', supplier: 'cj' }),
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { candidates: Candidate[] };
-    expect(body.candidates[0]?.supplierProvider).toBe('cj');
+    const { status, candidates } = await researchAndWait({ seed: 'silk eye mask', supplier: 'cj' });
+    expect(status).toBe('done');
+    expect(candidates[0]?.supplierProvider).toBe('cj');
   });
 
-  it('refuses a CJ research when CJ is not connected (but AliExpress would still work)', async () => {
-    const res = await SELF.fetch('https://s.example.com/api/product-research/research', {
-      method: 'POST',
-      headers: AUTH,
-      body: JSON.stringify({ seed: 'phone case', supplier: 'cj' }),
-    });
-    expect(res.status).toBe(502);
+  it('fails a CJ research when CJ is not connected (surfaced via run status)', async () => {
+    const { status, error } = await researchAndWait({ seed: 'phone case', supplier: 'cj' });
+    expect(status).toBe('failed');
+    expect(error ?? '').toMatch(/CJ/i);
   });
 });
 
@@ -143,14 +150,9 @@ describe('one-click list', () => {
       createdAt: 0,
     });
 
-    // Produce a candidate to list.
-    const research = await SELF.fetch('https://s.example.com/api/product-research/research', {
-      method: 'POST',
-      headers: AUTH,
-      body: JSON.stringify({ seed: 'silk eye mask' }),
-    });
-    const { candidates } = (await research.json()) as { candidates: { id: string }[] };
-    const candidateId = candidates[0]!.id;
+    // Produce a candidate to list (async research → poll).
+    const { candidates } = await researchAndWait({ seed: 'silk eye mask' });
+    const candidateId = (candidates[0] as unknown as { id: string }).id;
 
     const listed = await SELF.fetch(`https://s.example.com/api/candidates/${candidateId}/list`, { method: 'POST', headers: AUTH });
     expect(listed.status).toBe(200);
@@ -168,13 +170,9 @@ describe('one-click list', () => {
 
   it('refuses to list when eBay is not connected', async () => {
     await connectCj();
-    const research = await SELF.fetch('https://s.example.com/api/product-research/research', {
-      method: 'POST',
-      headers: AUTH,
-      body: JSON.stringify({ seed: 'silk eye mask' }),
-    });
-    const { candidates } = (await research.json()) as { candidates: { id: string }[] };
-    const res = await SELF.fetch(`https://s.example.com/api/candidates/${candidates[0]!.id}/list`, { method: 'POST', headers: AUTH });
+    const { candidates } = await researchAndWait({ seed: 'silk eye mask' });
+    const candidateId = (candidates[0] as unknown as { id: string }).id;
+    const res = await SELF.fetch(`https://s.example.com/api/candidates/${candidateId}/list`, { method: 'POST', headers: AUTH });
     expect(res.status).toBe(400);
   });
 });
