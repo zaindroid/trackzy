@@ -340,6 +340,11 @@ export const researchRuns = sqliteTable(
       .notNull()
       .default('running'),
     error: text('error'),
+    // Resumable pipeline state (JSON) — the research funnel now advances one
+    // bounded step per client poll instead of running end-to-end in a single
+    // Worker background job, so progress must survive between invocations.
+    // Null once the run reaches 'done'/'failed'.
+    stateJson: text('state_json'),
     createdAt: integer('created_at').notNull(),
   },
   (t) => ({

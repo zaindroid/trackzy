@@ -5,7 +5,7 @@ import { createDb, productCandidates, researchRuns } from '@sourcing/db';
 import type { Env } from '../../env.js';
 import type { AuthedVariables } from '../../middleware/auth.js';
 import { errorResponse } from '../../lib/errors.js';
-import { runResearch } from '../../research/pipeline.js';
+import { initResearchState, stepResearch } from '../../research/pipeline.js';
 import { newId, now } from '../../lib/id.js';
 import { CREDIT_COSTS, InsufficientCreditsError, addCredits, spendCredits } from '../../lib/credits.js';
 
@@ -22,9 +22,10 @@ function withParsedJson(rows: (typeof productCandidates.$inferSelect)[]) {
 const searchSchema = z.object({ seed: z.string().min(1), supplier: z.enum(['cj', 'aliexpress']).default('aliexpress') });
 
 /**
- * Runs a research session synchronously (bounded fan-out — see pipeline.ts)
- * and returns the resulting candidates. Persisted regardless, so a slow/failed
- * client still finds them under GET / afterwards.
+ * Kicks off a research session and returns its run id immediately. The actual
+ * deep search happens step-by-step, driven by the dashboard's poll loop (see
+ * GET /runs/:id below) — not a single big background job. Persisted
+ * regardless, so a slow/failed client still finds results under GET / after.
  */
 app.post('/research', async (c) => {
   const parsed = searchSchema.safeParse(await c.req.json().catch(() => ({})));
@@ -44,24 +45,9 @@ app.post('/research', async (c) => {
     throw err;
   }
 
-  // ASYNC: create the run row now, return its id immediately, and process in the
-  // background (waitUntil) so the request isn't held for the 30-90s of a deep
-  // search. The client polls GET /runs/:id, then refetches candidates. This
-  // decouples the browser from the long crawl and keeps the portal responsive
-  // under concurrent load.
   const runId = newId();
-  await db.insert(researchRuns).values({ id: runId, userId, seed, status: 'running', createdAt: now() });
-
-  const job = (async () => {
-    try {
-      await runResearch(c.env, db, userId, seed, supplier, runId);
-    } catch (err) {
-      // runResearch already marks the run 'failed'; refund the credit here.
-      await addCredits(db, userId, CREDIT_COSTS.research, 'refund', 'research-failed').catch(() => {});
-      console.error(`[research] run ${runId} failed:`, err);
-    }
-  })();
-  c.executionCtx.waitUntil(job);
+  const state = initResearchState(seed, supplier);
+  await db.insert(researchRuns).values({ id: runId, userId, seed, status: 'running', stateJson: JSON.stringify(state), createdAt: now() });
 
   return c.json({ runId, status: 'running' }, 202);
 });
@@ -87,13 +73,36 @@ app.post('/clear', async (c) => {
   return c.json({ ok: true });
 });
 
+/**
+ * Reports run status — and, deliberately, ALSO drives it forward: while a run
+ * is 'running' this advances it by one bounded step before responding (see
+ * stepResearch/STEP_ITEM_BUDGET in pipeline.ts). A GET normally shouldn't have
+ * side effects, but this reuses the dashboard's existing 2.5s poll loop as the
+ * pipeline's engine instead of a `waitUntil()` background job — deliberately,
+ * so no single request ever needs more than a couple of short network calls,
+ * sidestepping Cloudflare's ~30s background-execution ceiling entirely.
+ */
 app.get('/runs/:id', async (c) => {
   const db = createDb(c.env.SOURCING_DB);
+  const userId = c.get('userId');
   const [run] = await db
     .select()
     .from(researchRuns)
-    .where(and(eq(researchRuns.id, c.req.param('id')), eq(researchRuns.userId, c.get('userId'))));
+    .where(and(eq(researchRuns.id, c.req.param('id')), eq(researchRuns.userId, userId)));
   if (!run) return errorResponse(c, 'NOT_FOUND', 'Run not found', 404);
+
+  if (run.status === 'running') {
+    try {
+      await stepResearch(c.env, db, userId, run);
+    } catch (err) {
+      // stepResearch already marked the run 'failed'; refund the credit here.
+      await addCredits(db, userId, CREDIT_COSTS.research, 'refund', 'research-failed').catch(() => {});
+      console.error(`[research] run ${run.id} failed:`, err);
+    }
+    const [updated] = await db.select().from(researchRuns).where(eq(researchRuns.id, run.id));
+    return c.json({ run: updated });
+  }
+
   return c.json({ run });
 });
 

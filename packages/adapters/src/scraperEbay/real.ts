@@ -1,4 +1,5 @@
 import type { EbayDemandListing, EbayDemandResult, ScraperEbayClient, ScraperEbayEnv } from './iface.js';
+import { fetchWithTimeout } from '../httpTimeout.js';
 
 function median(nums: number[]): number {
   if (nums.length === 0) return 0;
@@ -37,7 +38,7 @@ export class RealScraperEbayClient implements ScraperEbayClient {
     const url = `https://api.scraperapi.com/structured/ebay/search?api_key=${encodeURIComponent(
       this.env.SCRAPER_API_KEY ?? '',
     )}&query=${encodeURIComponent(keyword)}&country=us`;
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(url);
     if (!res.ok) throw new Error(`ScraperAPI eBay search failed: ${res.status} ${(await res.text()).slice(0, 200)}`);
 
     const data = (await res.json()) as unknown;

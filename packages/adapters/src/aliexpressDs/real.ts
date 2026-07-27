@@ -1,4 +1,5 @@
 import type { AliexpressDsClient, AliexpressDsEnv, AliexpressDsProduct, AliexpressDsProductStatus } from './iface.js';
+import { fetchWithTimeout } from '../httpTimeout.js';
 
 const REST_GATEWAY = 'https://api-sg.aliexpress.com/rest';
 const SYNC_GATEWAY = 'https://api-sg.aliexpress.com/sync';
@@ -76,7 +77,7 @@ export class RealAliexpressDsClient implements AliexpressDsClient {
         refresh_token: ALIEXPRESS_REFRESH_TOKEN,
       };
       params.sign = await this.sign(params, ALIEXPRESS_APP_SECRET, path);
-      const res = await fetch(REST_GATEWAY + path, {
+      const res = await fetchWithTimeout(REST_GATEWAY + path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams(params),
@@ -120,7 +121,7 @@ export class RealAliexpressDsClient implements AliexpressDsClient {
     };
     params.sign = await this.sign(params, ALIEXPRESS_APP_SECRET);
 
-    const res = await fetch(SYNC_GATEWAY, {
+    const res = await fetchWithTimeout(SYNC_GATEWAY, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(params),
@@ -172,7 +173,7 @@ export class RealAliexpressDsClient implements AliexpressDsClient {
     };
     params.sign = await this.sign(params, ALIEXPRESS_APP_SECRET);
 
-    const res = await fetch(SYNC_GATEWAY, {
+    const res = await fetchWithTimeout(SYNC_GATEWAY, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(params),

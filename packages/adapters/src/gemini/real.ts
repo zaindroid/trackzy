@@ -17,6 +17,7 @@ import type {
   RefineKeywordsInput,
   ExpandNichesInput,
 } from './iface.js';
+import { fetchWithTimeout } from '../httpTimeout.js';
 
 // Standard (non-Gemini-flavored) JSON Schema, per Groq's OpenAI-compatible
 // Structured Outputs — `type` unions for nullability plus `additionalProperties:
@@ -158,7 +159,7 @@ export class RealGeminiExtractor implements GeminiExtractor {
    */
   private async generate<T>(prompt: string, schemaName: string, responseSchema: object): Promise<T> {
     const model = this.env.GROQ_MODEL ?? 'openai/gpt-oss-120b';
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const res = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -243,7 +244,7 @@ export class RealGeminiExtractor implements GeminiExtractor {
     // replacement, same `embedContent` request/response shape.
     const model = this.env.GEMINI_EMBEDDING_MODEL ?? 'gemini-embedding-001';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:embedContent?key=${this.env.GEMINI_API_KEY ?? ''}`;
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: { parts: [{ text }] } }),
