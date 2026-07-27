@@ -6,6 +6,7 @@ import type { Env } from '../../env.js';
 import type { AuthedVariables } from '../../middleware/auth.js';
 import { errorResponse } from '../../lib/errors.js';
 import { runResearch } from '../../research/pipeline.js';
+import { CREDIT_COSTS, InsufficientCreditsError, addCredits, spendCredits } from '../../lib/credits.js';
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVariables }>();
 
@@ -30,10 +31,22 @@ app.post('/research', async (c) => {
 
   const db = createDb(c.env.SOURCING_DB);
   const userId = c.get('userId');
+
+  // Charge a credit up front; refund it if the run fails so a failure is free.
+  try {
+    await spendCredits(db, userId, CREDIT_COSTS.research, 'research');
+  } catch (err) {
+    if (err instanceof InsufficientCreditsError) {
+      return errorResponse(c, 'INSUFFICIENT_CREDITS', 'Not enough credits to run research — top up to continue.', 402);
+    }
+    throw err;
+  }
+
   let runId: string;
   try {
     runId = await runResearch(c.env, db, userId, parsed.data.seed, parsed.data.supplier);
   } catch (err) {
+    await addCredits(db, userId, CREDIT_COSTS.research, 'refund', 'research-failed').catch(() => {});
     const raw = err instanceof Error ? err.message : 'Research failed';
     // Surface Apify quota exhaustion as a plain-language message rather than the
     // raw actor error — it's an account/billing condition, not a bug.

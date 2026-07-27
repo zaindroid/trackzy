@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm';
 import type { Env } from '../env.js';
 import { errorResponse } from '../lib/errors.js';
 import { newId, now } from '../lib/id.js';
+import { grantTrialIfNew } from '../lib/credits.js';
 
 export type AuthedVariables = { userId: string };
 export type AuthedContext = Context<{ Bindings: Env; Variables: AuthedVariables }>;
@@ -34,6 +35,9 @@ export async function authMiddleware(c: AuthedContext, next: Next) {
   if (!user) {
     return errorResponse(c, 'UNAUTHORIZED', 'No account exists for this session', 401);
   }
+
+  // Idempotently grant the signup trial credits (no-op after the first time).
+  await grantTrialIfNew(db, user.id);
 
   c.set('userId', user.id);
   await next();

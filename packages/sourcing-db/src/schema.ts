@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, check } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, check, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { relations, sql } from 'drizzle-orm';
 
 // The sourcing portal's OWN database — fully independent of trackzy's
@@ -66,6 +66,56 @@ export const demandCache = sqliteTable('demand_cache', {
   dataJson: text('data_json').notNull(),
   lastChecked: integer('last_checked').notNull(),
 });
+
+// The platform's credit balance per user. `balance` is the spendable credit
+// count (cached for fast reads); the source-of-truth history is credit_ledger.
+// `trialGrantedAt` makes the one-time signup grant idempotent.
+export const creditAccounts = sqliteTable('credit_accounts', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => users.id),
+  balance: integer('balance').notNull().default(0),
+  trialGrantedAt: integer('trial_granted_at'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+// Append-only ledger of every credit change (grant, spend, purchase, refund),
+// for auditability and the dashboard's usage history. `delta` is +grant/-spend;
+// `balanceAfter` snapshots the resulting balance; `reason` + `refId` explain it.
+export const creditLedger = sqliteTable('credit_ledger', {
+  id: text('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id),
+  delta: integer('delta').notNull(),
+  balanceAfter: integer('balance_after').notNull(),
+  reason: text('reason').notNull(),
+  refId: text('ref_id'),
+  createdAt: integer('created_at').notNull(),
+});
+
+// Anti-abuse: each external seller/supplier account (eBay, AliExpress, CJ) may
+// bind to exactly ONE platform account, permanently — so trial credits can't be
+// farmed by cycling dummy signups (real verified eBay seller accounts are hard
+// to mass-create). The binding PERSISTS even after a user disconnects, so it
+// can't be recycled. Unique on (provider, externalId). Enforcement is skipped
+// in mock/sandbox mode so it doesn't block internal testing.
+export const externalAccountLinks = sqliteTable(
+  'external_account_links',
+  {
+    id: text('id').primaryKey(),
+    provider: text('provider', { enum: ['ebay', 'aliexpress', 'cj'] }).notNull(),
+    externalId: text('external_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    firstLinkedAt: integer('first_linked_at').notNull(),
+  },
+  (t) => ({
+    providerExternalUnique: uniqueIndex('external_account_links_provider_external_unique').on(t.provider, t.externalId),
+  }),
+);
 
 // Feeds the inline shipping/return details on AddFixedPriceItem (avoiding the
 // eBay Business-Policies dependency) plus the margin/markup math. One row per

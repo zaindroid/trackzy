@@ -6,6 +6,7 @@ import { ResearchPage } from './pages/Research.js';
 import { RadarPage } from './pages/Radar.js';
 import { ConnectionsPage } from './pages/Connections.js';
 import { SettingsPage } from './pages/Settings.js';
+import { BillingPage } from './pages/Billing.js';
 
 export default function App() {
   const { token } = useAuthToken();
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="/research" element={<ResearchPage />} />
         <Route path="/radar" element={<RadarPage />} />
         <Route path="/connections" element={<ConnectionsPage />} />
+        <Route path="/billing" element={<BillingPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/research" replace />} />
       </Routes>

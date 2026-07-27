@@ -63,6 +63,20 @@ export interface RadarProduct {
   lastUpdated: number;
 }
 
+export interface CreditLedgerEntry {
+  id: string;
+  delta: number;
+  balanceAfter: number;
+  reason: string;
+  createdAt: number;
+}
+
+export interface CreditsResponse {
+  balance: number;
+  costs: Record<string, number>;
+  ledger: CreditLedgerEntry[];
+}
+
 export class ApiError extends Error {
   constructor(
     public code: string,

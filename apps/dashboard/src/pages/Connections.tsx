@@ -65,10 +65,12 @@ export function ConnectionsPage() {
   });
 
   const [cjApiKey, setCjApiKey] = useState('');
+  const [cjReplacing, setCjReplacing] = useState(false);
   const connectCj = useMutation({
     mutationFn: () => apiFetch('/connections/cj', token, { method: 'POST', body: JSON.stringify({ apiKey: cjApiKey }) }),
     onSuccess: () => {
       setCjApiKey('');
+      setCjReplacing(false);
       queryClient.invalidateQueries({ queryKey: ['suppliers'] });
     },
   });
@@ -88,9 +90,19 @@ export function ConnectionsPage() {
           </Button>
         )}
         {ebayConnected && (
-          <Button variant="secondary" onClick={() => syncListings.mutate()} disabled={syncListings.isPending}>
-            {syncListings.isPending ? 'Syncing…' : 'Sync listings now'}
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button variant="secondary" onClick={() => syncListings.mutate()} disabled={syncListings.isPending}>
+              {syncListings.isPending ? 'Syncing…' : 'Sync listings now'}
+            </Button>
+            <button
+              type="button"
+              className="text-xs text-ink-muted underline hover:text-ink disabled:opacity-50"
+              onClick={() => startOAuth.mutate('ebay')}
+              disabled={startOAuth.isPending}
+            >
+              Reconnect
+            </button>
+          </div>
         )}
       </ConnectionCard>
       {startOAuth.isError && startOAuth.variables === 'ebay' && (
@@ -100,7 +112,16 @@ export function ConnectionsPage() {
       {syncListings.isError && <p className="-mt-3 mb-4 text-sm text-brick">{(syncListings.error as Error).message}</p>}
 
       <ConnectionCard title="AliExpress" description="Automated ordering via AliExpress's Dropshipping API." connected={aliexpressConnected}>
-        {!aliexpressConnected && (
+        {aliexpressConnected ? (
+          <button
+            type="button"
+            className="text-xs text-ink-muted underline hover:text-ink disabled:opacity-50"
+            onClick={() => startOAuth.mutate('aliexpress')}
+            disabled={startOAuth.isPending}
+          >
+            Reconnect
+          </button>
+        ) : (
           <Button variant="primary" onClick={() => startOAuth.mutate('aliexpress')} disabled={startOAuth.isPending}>
             Connect AliExpress
           </Button>
@@ -111,7 +132,7 @@ export function ConnectionsPage() {
       )}
 
       <ConnectionCard title="CJ Dropshipping" description="Automated ordering via CJ's API." connected={cjConnected}>
-        {!cjConnected && (
+        {!cjConnected || cjReplacing ? (
           <div className="flex flex-col gap-2 sm:flex-row">
             <TextInput
               placeholder="Your CJ dashboard API key"
@@ -120,9 +141,17 @@ export function ConnectionsPage() {
               className="sm:w-64"
             />
             <Button variant="primary" onClick={() => connectCj.mutate()} disabled={connectCj.isPending || !cjApiKey}>
-              Connect
+              {cjConnected ? 'Update key' : 'Connect'}
             </Button>
           </div>
+        ) : (
+          <button
+            type="button"
+            className="text-xs text-ink-muted underline hover:text-ink"
+            onClick={() => setCjReplacing(true)}
+          >
+            Reconnect
+          </button>
         )}
         {connectCj.isError && <p className="mt-2 text-sm text-brick">{(connectCj.error as Error).message}</p>}
       </ConnectionCard>

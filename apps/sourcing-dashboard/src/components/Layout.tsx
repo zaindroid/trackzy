@@ -1,12 +1,26 @@
 import { useState, type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuthToken } from '../lib/auth.js';
 import { useTheme } from '../lib/theme.js';
+import { apiFetch, type CreditsResponse } from '../lib/api.js';
+
+function CreditChip() {
+  const { getToken } = useAuthToken();
+  const { data } = useQuery({ queryKey: ['credits'], queryFn: () => apiFetch<CreditsResponse>('/credits', getToken) });
+  return (
+    <NavLink to="/billing" className="flex items-center justify-between rounded-sm border border-rule px-3 py-2 text-sm hover:border-signal">
+      <span className="text-ink-muted">Credits</span>
+      <span className="font-display font-semibold text-ink">{data?.balance ?? '—'}</span>
+    </NavLink>
+  );
+}
 
 const NAV_ITEMS = [
   { to: '/research', label: 'Research' },
   { to: '/radar', label: 'Radar' },
   { to: '/connections', label: 'Connections' },
+  { to: '/billing', label: 'Billing' },
   { to: '/settings', label: 'Settings' },
 ];
 
@@ -56,6 +70,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const sidebar = (
     <div className="flex h-full flex-col gap-6">
       <Wordmark />
+      <CreditChip />
       <NavList onNavigate={() => setDrawerOpen(false)} />
       <div className="mt-auto flex flex-col gap-1 border-t border-rule pt-4">
         <ThemeToggle />

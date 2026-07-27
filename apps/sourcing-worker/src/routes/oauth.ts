@@ -6,6 +6,7 @@ import type { Env } from '../env.js';
 import { now } from '../lib/id.js';
 import { encryptCredential } from '../lib/credentialCrypto.js';
 import { verifyOauthState } from '../lib/oauthState.js';
+import { bindExternalAccount, AccountAlreadyLinkedError } from '../lib/accountBinding.js';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -68,6 +69,18 @@ app.get('/ebay/callback', async (c) => {
   }
 
   const db = createDb(c.env.SOURCING_DB);
+
+  // Anti-abuse: bind this eBay account to exactly one platform account. Blocks
+  // trial-credit farming via dummy signups. Skipped in sandbox/non-prod.
+  try {
+    await bindExternalAccount(c.env, db, userId, 'ebay', ebayUsername);
+  } catch (err) {
+    if (err instanceof AccountAlreadyLinkedError) {
+      return c.html(resultPage(false, err.message), 409);
+    }
+    throw err;
+  }
+
   const [existing] = await db.select().from(ebayConnections).where(eq(ebayConnections.userId, userId));
   if (existing) {
     await db

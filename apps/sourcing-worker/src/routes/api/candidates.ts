@@ -9,6 +9,7 @@ import { errorResponse } from '../../lib/errors.js';
 import { now } from '../../lib/id.js';
 import { getFreshEbayToken } from '../../lib/ebayConnection.js';
 import { notifyTrackzy } from '../../lib/trackzyHandoff.js';
+import { CREDIT_COSTS, InsufficientCreditsError, addCredits, spendCredits } from '../../lib/credits.js';
 
 const app = new Hono<{ Bindings: Env; Variables: AuthedVariables }>();
 
@@ -68,6 +69,17 @@ app.post('/:id/list', async (c) => {
   const accessToken = await getFreshEbayToken(c.env, db, userId);
   if (!accessToken) return errorResponse(c, 'NO_EBAY', 'Connect your eBay account before listing', 400);
 
+  // Charge for the listing; refunded below if eBay rejects it, so a failed
+  // publish is free.
+  try {
+    await spendCredits(db, userId, CREDIT_COSTS.list, 'list', candidate.id);
+  } catch (err) {
+    if (err instanceof InsufficientCreditsError) {
+      return errorResponse(c, 'INSUFFICIENT_CREDITS', 'Not enough credits to list — top up to continue.', 402);
+    }
+    throw err;
+  }
+
   const [settings] = await db.select().from(sellerSettings).where(eq(sellerSettings.userId, userId));
   const listing = createEbayListingClient(c.env);
 
@@ -79,10 +91,14 @@ app.post('/:id/list', async (c) => {
     } catch (err) {
       // Don't let a Taxonomy failure escape as an unhandled 500 (which the UI
       // can't parse into a message) — surface it as a clean error instead.
+      await addCredits(db, userId, CREDIT_COSTS.list, 'refund', candidate.id).catch(() => {});
       return errorResponse(c, 'CATEGORY_LOOKUP_FAILED', err instanceof Error ? err.message : 'eBay category lookup failed', 502);
     }
   }
-  if (!categoryId) return errorResponse(c, 'NO_CATEGORY', 'Could not determine an eBay category for this item', 422);
+  if (!categoryId) {
+    await addCredits(db, userId, CREDIT_COSTS.list, 'refund', candidate.id).catch(() => {});
+    return errorResponse(c, 'NO_CATEGORY', 'Could not determine an eBay category for this item', 422);
+  }
 
   const sku = candidate.sku ?? `SRC-${candidate.id}`;
   const imageUrls = JSON.parse(candidate.supplierImageUrlsJson) as string[];
@@ -108,6 +124,7 @@ app.post('/:id/list', async (c) => {
     });
     ebayItemId = result.ebayItemId;
   } catch (err) {
+    await addCredits(db, userId, CREDIT_COSTS.list, 'refund', candidate.id).catch(() => {});
     return errorResponse(c, 'LISTING_FAILED', err instanceof Error ? err.message : 'eBay rejected the listing', 502);
   }
 
