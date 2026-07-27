@@ -18,8 +18,8 @@ const SORTERS: Record<SortKey, (a: RadarProduct, b: RadarProduct) => number> = {
 };
 
 function Thumb({ src, alt }: { src: string | null; alt: string }) {
-  if (!src) return <div className="flex h-12 w-12 shrink-0 items-center justify-center border border-rule bg-paper text-[8px] text-ink-faint">No image</div>;
-  return <img src={src} alt={alt} className="h-12 w-12 shrink-0 border border-rule object-cover" />;
+  if (!src) return <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-rule bg-paper text-[8px] text-ink-faint">No image</div>;
+  return <img src={src} alt={alt} className="h-12 w-12 shrink-0 rounded-lg border border-rule object-cover" />;
 }
 
 export function RadarPage() {
@@ -51,7 +51,7 @@ export function RadarPage() {
         description="Products with proven eBay demand, cross-checked against an AliExpress supplier and ranked by opportunity. Margin is shown for your own fee settings. Updated automatically by the research crawler."
       />
 
-      <div className="mb-4 flex flex-wrap items-center gap-3 border border-rule bg-paper-raised p-3 shadow-raised">
+      <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-rule bg-paper-raised p-3 shadow-raised">
         <label className="text-xs text-ink-muted">
           Sort by
           <Select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="ml-2 w-44">
@@ -89,7 +89,7 @@ export function RadarPage() {
       )}
 
       {rows.length > 0 && (
-        <div className="overflow-x-auto border border-rule">
+        <div className="overflow-x-auto rounded-2xl border border-rule shadow-raised">
           <table className="w-full min-w-[720px] border-collapse text-sm">
             <thead>
               <tr className="border-b border-rule bg-paper-raised text-left text-xs uppercase tracking-wide text-ink-muted">
