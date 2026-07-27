@@ -9,9 +9,9 @@ const LOW_BALANCE_THRESHOLD = 30;
 
 function useAnimatedNumber(value: number): number {
   const [display, setDisplay] = useState(value);
-  const fromRef = useRef(value);
+  const displayRef = useRef(value);
   useEffect(() => {
-    const from = fromRef.current;
+    const from = displayRef.current;
     const to = value;
     if (from === to) return;
     const duration = 420;
@@ -20,9 +20,10 @@ function useAnimatedNumber(value: number): number {
     function tick(now: number) {
       const t = Math.min(1, (now - start) / duration);
       const eased = 1 - Math.pow(1 - t, 3);
-      setDisplay(Math.round(from + (to - from) * eased));
+      const next = Math.round(from + (to - from) * eased);
+      displayRef.current = next;
+      setDisplay(next);
       if (t < 1) raf = requestAnimationFrame(tick);
-      else fromRef.current = to;
     }
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
