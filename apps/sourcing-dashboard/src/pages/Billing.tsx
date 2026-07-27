@@ -52,7 +52,7 @@ export function BillingPage() {
       <Panel title="Buy credits & plans" className="mb-4">
         <div className="grid gap-3 sm:grid-cols-2">
           {offerings.map((o) => (
-            <div key={o.id} className="flex flex-col items-start gap-1 border border-rule p-4">
+            <div key={o.id} className="flex flex-col items-start gap-1 rounded-xl border border-rule p-4">
               <span className="font-medium text-ink">{o.label}</span>
               <span className="text-sm text-ink-muted">{o.price}</span>
               <Button
