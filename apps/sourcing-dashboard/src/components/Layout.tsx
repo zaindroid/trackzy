@@ -119,7 +119,7 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
 function ThemeToggle() {
   const { theme, toggleTheme } = useTheme();
   return (
-    <button onClick={toggleTheme} className="rounded-sm px-3 py-2 text-left text-sm text-ink-muted transition-colors hover:bg-paper hover:text-ink">
+    <button onClick={toggleTheme} className="rounded-lg px-3 py-2 text-left text-sm text-ink-muted transition-colors hover:bg-paper hover:text-ink">
       {theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
     </button>
   );
@@ -136,7 +136,7 @@ export function Layout({ children }: { children: ReactNode }) {
       <NavList onNavigate={() => setDrawerOpen(false)} />
       <div className="mt-auto flex flex-col gap-1 border-t border-rule pt-4">
         <ThemeToggle />
-        <button onClick={logout} className="rounded-sm px-3 py-2 text-left text-sm text-ink-muted transition-colors hover:bg-paper hover:text-ink">
+        <button onClick={logout} className="rounded-lg px-3 py-2 text-left text-sm text-ink-muted transition-colors hover:bg-paper hover:text-ink">
           Sign out
         </button>
       </div>
@@ -147,7 +147,7 @@ export function Layout({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-paper text-ink">
       <header className="flex items-center justify-between border-b border-rule px-4 py-3 lg:hidden">
         <Wordmark />
-        <button onClick={() => setDrawerOpen(true)} aria-label="Open menu" className="rounded-sm border border-rule px-3 py-2 text-sm text-ink">
+        <button onClick={() => setDrawerOpen(true)} aria-label="Open menu" className="rounded-lg border border-rule px-3 py-2 text-sm text-ink">
           Menu
         </button>
       </header>
