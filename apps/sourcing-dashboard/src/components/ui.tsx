@@ -14,14 +14,14 @@ export function Button({
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: keyof typeof VARIANTS }) {
   return (
     <button
-      className={`inline-flex items-center justify-center rounded-sm px-3 py-1.5 text-sm font-medium transition-colors ${VARIANTS[variant]} ${className}`}
+      className={`inline-flex items-center justify-center rounded-lg px-3 py-1.5 text-sm font-medium transition-all active:scale-[0.97] ${VARIANTS[variant]} ${className}`}
       {...props}
     />
   );
 }
 
 const FIELD_CLASSES =
-  'w-full rounded-sm border border-rule bg-paper-raised px-3 py-1.5 text-sm text-ink placeholder:text-ink-faint disabled:opacity-50';
+  'w-full rounded-lg border border-rule bg-paper-raised px-3 py-1.5 text-sm text-ink placeholder:text-ink-faint disabled:opacity-50';
 
 export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={`${FIELD_CLASSES} ${props.className ?? ''}`} />;
@@ -55,7 +55,7 @@ export function Field({ label, children }: { label: string; children: ReactNode 
 
 export function Panel({ title, children, className = '' }: { title?: string; children: ReactNode; className?: string }) {
   return (
-    <section className={`rounded-sm border border-rule bg-paper-raised p-4 shadow-raised sm:p-5 ${className}`}>
+    <section className={`rounded-2xl border border-rule bg-paper-raised p-4 shadow-raised sm:p-5 ${className}`}>
       {title && <h2 className="mb-3 text-sm font-semibold text-ink">{title}</h2>}
       {children}
     </section>
@@ -87,4 +87,28 @@ export function PageHeader({
 
 export function EmptyState({ children }: { children: ReactNode }) {
   return <p className="px-4 py-10 text-center text-sm text-ink-faint">{children}</p>;
+}
+
+const BADGE_TONES = {
+  moss: 'bg-moss/15 text-moss',
+  ochre: 'bg-ochre/20 text-ochre',
+  brick: 'bg-brick/15 text-brick',
+  signal: 'bg-signal/15 text-signal',
+  neutral: 'bg-paper text-ink-faint',
+};
+
+export function Badge({
+  tone = 'neutral',
+  className = '',
+  children,
+}: {
+  tone?: keyof typeof BADGE_TONES;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium capitalize ${BADGE_TONES[tone]} ${className}`}>
+      {children}
+    </span>
+  );
 }
