@@ -8,3 +8,5 @@ coverage/
 .turbo/
 apps/dashboard/dist/
 apps/worker/public/
+
+.superpowers/
